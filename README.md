@@ -13,6 +13,28 @@ The first milestone is a conventional walking-route demo:
 
 Routes follow a bundled pedestrian graph instead of straight building-to-building lines. Buildings are snapped to nearby walkway access points, and the backend runs Dijkstra's algorithm across connected footways, pedestrian paths, crossings, and steps.
 
+## Milestone 2: shade data foundation
+
+Step 2 begins with a repeatable importer for Texas A&M's public tree inventory and university-building footprints. The importer:
+
+- queries only the campus bounds used by the current routing graph;
+- follows ArcGIS pagination so large tree layers are not truncated;
+- preserves WGS 84 source geometry and adds local metric coordinates in UTM zone 14N (`EPSG:32614`);
+- converts tree height and canopy spread from assumed feet to meters;
+- estimates building height as floor count times 3.5 meters; and
+- records provenance, assumptions, readiness totals, and per-feature quality flags.
+
+The public tree layer does not declare measurement units in its service metadata. The feet-to-meters conversion is therefore an explicit, reviewable assumption rather than a claim about the source schema. Features with missing dimensions, removal dates, invalid geometry, or missing floor counts remain in the snapshot but are marked as unavailable for shade modeling.
+
+To refresh the bundled shade inputs from the live TAMU service:
+
+```bash
+cd backend
+python3 scripts/ingest_tamu_gis.py app/data/shade_features.json
+```
+
+The generated file is self-describing. Its `summary` object reports how many trees and buildings are ready for the next solar-shadow phase and why excluded records were rejected.
+
 ## Pedestrian routing data
 
 The bundled graph in `backend/app/data/pedestrian_graph.json` is derived from [OpenStreetMap](https://www.openstreetmap.org/) data and is available under the [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) license. Texas A&M's [official sidewalk layer](https://gis.tamu.edu/arcgis/rest/services/FCOR/TAMU_BaseMap/MapServer/18) can be used for visual validation.

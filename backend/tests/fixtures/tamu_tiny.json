@@ -1,0 +1,106 @@
+{
+  "trees": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "GlobalID": "{TREE-1}",
+        "Common_Name": "Live oak",
+        "Species": "Quercus virginiana",
+        "Height": 40,
+        "Canopy_Spread": 20,
+        "Health": "Good",
+        "Condition": "Good",
+        "Status": "Alive",
+        "Date_Removed": null,
+        "last_edited_date": 1700000000000
+      },
+      "geometry": {"x": -96.3408, "y": 30.6214}
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "GlobalID": "{TREE-2}",
+        "Common_Name": null,
+        "Species": "Unknown",
+        "Height": null,
+        "Canopy_Spread": 0,
+        "Health": "Dead",
+        "Condition": "Dead",
+        "Status": "Dead",
+        "Date_Removed": null,
+        "last_edited_date": null
+      },
+      "geometry": {"x": -96.3407, "y": 30.6213}
+    },
+    {
+      "attributes": {
+        "OBJECTID": 3,
+        "GlobalID": "{TREE-3}",
+        "Common_Name": "Cedar elm",
+        "Species": "Ulmus crassifolia",
+        "Height": 30,
+        "Canopy_Spread": 16,
+        "Health": null,
+        "Condition": "Fair",
+        "Status": null,
+        "Date_Removed": 1710000000000,
+        "last_edited_date": 1710000000000
+      },
+      "geometry": {"x": -96.3406, "y": 30.6212}
+    }
+  ],
+  "buildings": [
+    {
+      "attributes": {
+        "OBJECTID": 90,
+        "BldgNum": " 0518 ",
+        "BldgAbbr": " ZACH ",
+        "BldgName": " Zachry Engineering Education Complex ",
+        "NumFloors": "5",
+        "status": "1",
+        "BldgDate": null
+      },
+      "geometry": {
+        "rings": [[
+          [-96.3409, 30.6215],
+          [-96.3407, 30.6215],
+          [-96.3407, 30.6213],
+          [-96.3409, 30.6213],
+          [-96.3409, 30.6215]
+        ]]
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 91,
+        "BldgNum": "0001",
+        "BldgAbbr": "TEST",
+        "BldgName": "No Floor Count",
+        "NumFloors": " ",
+        "status": "1",
+        "BldgDate": null
+      },
+      "geometry": {
+        "rings": [[
+          [-96.3412, 30.6215],
+          [-96.3410, 30.6215],
+          [-96.3410, 30.6213],
+          [-96.3412, 30.6213],
+          [-96.3412, 30.6215]
+        ]]
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 92,
+        "BldgNum": "0002",
+        "BldgAbbr": "BAD",
+        "BldgName": "Bad Geometry",
+        "NumFloors": "3",
+        "status": "1",
+        "BldgDate": null
+      },
+      "geometry": {"rings": []}
+    }
+  ]
+}
