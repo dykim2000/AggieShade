@@ -1,10 +1,16 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .campus import BUILDING_NODES, NODES, Building, Route
 from .shade.solar import SOLAR_REFERENCE_URL, TIME_BUCKET_MINUTES, SolarPosition
-from .shade.trees import MAX_TREE_SHADOW_LENGTH_M, TreeShadow, TreeShadowBucket
+from .shade.trees import (
+    MAX_TREE_SHADOW_LENGTH_M,
+    TreeShadow,
+    TreeShadowBucket,
+    TreeShadowMapBucket,
+)
 
 
 class PointResponse(BaseModel):
@@ -143,6 +149,50 @@ class TreeShadowCollectionResponse(BaseModel):
                 default=0,
             ),
             shadows=[TreeShadowResponse.from_tree_shadow(shadow) for shadow in bucket.shadows],
+        )
+
+
+class GeoJsonMultiPolygonGeometry(BaseModel):
+    type: Literal["MultiPolygon"] = "MultiPolygon"
+    coordinates: list[list[list[tuple[float, float]]]]
+
+
+class GeoJsonFeature(BaseModel):
+    type: Literal["Feature"] = "Feature"
+    properties: dict[str, str] = Field(default_factory=dict)
+    geometry: GeoJsonMultiPolygonGeometry
+
+
+class GeoJsonFeatureCollection(BaseModel):
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    features: list[GeoJsonFeature]
+
+
+class TreeShadowMapResponse(BaseModel):
+    bucket_start: datetime
+    bucket_minutes: int
+    daylight: bool
+    shadow_azimuth_degrees: float | None
+    shadow_count: int
+    geojson: GeoJsonFeatureCollection
+
+    @classmethod
+    def from_tree_shadow_map_bucket(
+        cls,
+        bucket: TreeShadowMapBucket,
+    ) -> "TreeShadowMapResponse":
+        geometry = GeoJsonMultiPolygonGeometry(
+            coordinates=[[list(polygon)] for polygon in bucket.polygons_wgs84]
+        )
+        return cls(
+            bucket_start=bucket.bucket_start,
+            bucket_minutes=TIME_BUCKET_MINUTES,
+            daylight=bucket.daylight,
+            shadow_azimuth_degrees=bucket.shadow_azimuth_degrees,
+            shadow_count=len(bucket.polygons_wgs84),
+            geojson=GeoJsonFeatureCollection(
+                features=[GeoJsonFeature(geometry=geometry)],
+            ),
         )
 
 

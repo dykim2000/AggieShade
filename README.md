@@ -62,6 +62,8 @@ curl --get 'http://127.0.0.1:8000/shade/tree-shadows' \
 
 The response reports the bucket time, solar direction, data-quality counts, cap metadata, and one closed metric polygon per eligible tree. The current capsule model intentionally favors fast campus-wide scoring; later field validation can replace it without changing the API's metric-coordinate contract.
 
+The Expo map also requests `/shade/tree-shadows/map` after its initial interactions settle. That endpoint returns simplified WGS 84 polygons as one GeoJSON multipolygon, allowing the app to display the current bucket without recalculating the full metric response or rerendering the overlay when a search field receives focus. The overlay refreshes every 15 minutes and reports nighttime or connection status directly on the map.
+
 ## Pedestrian routing data
 
 The bundled graph in `backend/app/data/pedestrian_graph.json` is derived from [OpenStreetMap](https://www.openstreetmap.org/) data and is available under the [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) license. Texas A&M's [official sidewalk layer](https://gis.tamu.edu/arcgis/rest/services/FCOR/TAMU_BaseMap/MapServer/18) can be used for visual validation.

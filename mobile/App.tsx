@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  InteractionManager,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,10 +13,10 @@ import {
   TextInput,
   View,
 } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import MapView, { Geojson, Marker, Polyline } from "react-native-maps";
 
-import { getBuildings, getRoute } from "./src/api";
-import type { Building, Route } from "./src/types";
+import { getBuildings, getRoute, getTreeShadowMap } from "./src/api";
+import type { Building, Route, TreeShadowGeoJson, TreeShadowMap } from "./src/types";
 
 const MAROON = "#500000";
 const GREEN = "#287052";
@@ -29,12 +30,49 @@ const TAMU_REGION = {
 
 type SearchField = "origin" | "destination";
 
+type ShadowOverlayProps = {
+  geojson: TreeShadowGeoJson;
+};
+
+const ShadowOverlay = memo(function ShadowOverlay({ geojson }: ShadowOverlayProps) {
+  return (
+    <Geojson
+      fillColor="rgba(35, 54, 47, 0.20)"
+      geojson={geojson}
+      strokeColor="rgba(35, 54, 47, 0.32)"
+      strokeWidth={0.5}
+      tappable={false}
+      zIndex={1}
+    />
+  );
+});
+
 function formatDistance(meters: number): string {
   return meters < 1000 ? `${meters} m` : `${(meters / 1000).toFixed(1)} km`;
 }
 
 function formatDuration(seconds: number): string {
   return `${Math.max(1, Math.round(seconds / 60))} min`;
+}
+
+function formatBucketTime(bucketStart: string): string {
+  return new Date(bucketStart).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatShadeStatus(
+  loading: boolean,
+  failed: boolean,
+  shadowMap: TreeShadowMap | null,
+): string {
+  if (loading) return "Loading current tree shade…";
+  if (failed || !shadowMap) return "Tree shade unavailable";
+  const bucketTime = formatBucketTime(shadowMap.bucket_start);
+  return shadowMap.daylight
+    ? `${shadowMap.shadow_count.toLocaleString()} tree shadows · ${bucketTime}`
+    : `Nighttime · no tree shadows · ${bucketTime}`;
 }
 
 function buildingMatchScore(building: Building, query: string): number | null {
@@ -113,6 +151,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [routing, setRouting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [treeShadowMap, setTreeShadowMap] = useState<TreeShadowMap | null>(null);
+  const [shadeLoading, setShadeLoading] = useState(true);
+  const [shadeError, setShadeError] = useState(false);
 
   useEffect(() => {
     getBuildings()
@@ -127,6 +168,38 @@ export default function App() {
         setError(requestError instanceof Error ? requestError.message : "Could not load campus buildings");
       })
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let refreshTimer: ReturnType<typeof setInterval> | undefined;
+
+    async function refreshShadows() {
+      try {
+        const result = await getTreeShadowMap(new Date());
+        if (active) {
+          setTreeShadowMap(result);
+          setShadeError(false);
+        }
+      } catch {
+        if (active) {
+          setTreeShadowMap(null);
+          setShadeError(true);
+        }
+      } finally {
+        if (active) setShadeLoading(false);
+      }
+    }
+
+    const interactionTask = InteractionManager.runAfterInteractions(() => {
+      void refreshShadows();
+      refreshTimer = setInterval(() => void refreshShadows(), 15 * 60 * 1_000);
+    });
+    return () => {
+      active = false;
+      interactionTask.cancel();
+      if (refreshTimer) clearInterval(refreshTimer);
+    };
   }, []);
 
   useEffect(() => {
@@ -164,6 +237,7 @@ export default function App() {
     [activeQuery, buildings],
   );
   const searchResults = matchingBuildings.slice(0, 8);
+  const shadeStatus = formatShadeStatus(shadeLoading, shadeError, treeShadowMap);
 
   async function requestRoute() {
     if (!originId || !destinationId || originId === destinationId) return;
@@ -229,6 +303,7 @@ export default function App() {
       <View style={styles.content}>
         <View style={styles.mapShell}>
           <MapView ref={mapRef} style={styles.map} initialRegion={TAMU_REGION}>
+            {treeShadowMap?.shadow_count ? <ShadowOverlay geojson={treeShadowMap.geojson} /> : null}
             {selectedBuildings.map((building) => (
               <Marker
                 key={building.id}
@@ -236,10 +311,17 @@ export default function App() {
                 title={building.short_name}
                 description={building.name}
                 pinColor={building.id === originId ? GREEN : MAROON}
+                zIndex={5}
               />
             ))}
             {route && (
-              <Polyline coordinates={route.geometry} strokeColor={MAROON} strokeWidth={6} lineCap="round" />
+              <Polyline
+                coordinates={route.geometry}
+                strokeColor={MAROON}
+                strokeWidth={6}
+                lineCap="round"
+                zIndex={4}
+              />
             )}
           </MapView>
           {route && (
@@ -250,6 +332,21 @@ export default function App() {
               </Text>
             </View>
           )}
+          <View pointerEvents="none" style={styles.shadeCard}>
+            {shadeLoading ? (
+              <ActivityIndicator color={GREEN} size="small" />
+            ) : (
+              <View
+                style={[
+                  styles.shadeDot,
+                  (shadeError || !treeShadowMap?.daylight) && styles.shadeDotInactive,
+                ]}
+              />
+            )}
+            <Text numberOfLines={1} style={styles.shadeText}>
+              {shadeStatus}
+            </Text>
+          </View>
         </View>
 
         <KeyboardAvoidingView
@@ -426,6 +523,22 @@ const styles = StyleSheet.create({
   },
   routeCardLabel: { color: GREEN, fontSize: 9, fontWeight: "800", letterSpacing: 1 },
   routeCardValue: { color: MAROON, fontSize: 17, fontWeight: "800", marginTop: 2 },
+  shadeCard: {
+    position: "absolute",
+    right: 10,
+    bottom: 10,
+    left: 10,
+    minHeight: 30,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    backgroundColor: "rgba(255,255,255,0.94)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  shadeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: GREEN },
+  shadeDotInactive: { backgroundColor: "#9A9087" },
+  shadeText: { flex: 1, color: "#4B433D", fontSize: 10, fontWeight: "700" },
   selectionArea: { flex: 1, marginTop: 6 },
   panelScroll: { flex: 1 },
   panel: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, gap: 11 },

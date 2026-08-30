@@ -6,8 +6,10 @@ from app.shade.trees import (
     MAX_TREE_SHADOW_LENGTH_M,
     SHADE_READY_TREES,
     clear_tree_shadow_cache,
+    metric_polygon_to_wgs84,
     shade_ready_trees_from_dataset,
     tree_shadow_cache_info,
+    tree_shadow_map_at,
     tree_shadow_polygon,
     tree_shadows_at,
 )
@@ -30,6 +32,7 @@ class TreeShadowTests(unittest.TestCase):
                 {
                     "source_id": 1,
                     "point_m": [100.0, 200.0],
+                    "point_wgs84": [-96.34, 30.62],
                     "height_m": 8.0,
                     "canopy_radius_m": 2.0,
                     "shade_ready": True,
@@ -37,6 +40,7 @@ class TreeShadowTests(unittest.TestCase):
                 {
                     "source_id": 2,
                     "point_m": [101.0, 201.0],
+                    "point_wgs84": [-96.34, 30.62],
                     "height_m": None,
                     "canopy_radius_m": 2.0,
                     "shade_ready": True,
@@ -44,6 +48,7 @@ class TreeShadowTests(unittest.TestCase):
                 {
                     "source_id": 3,
                     "point_m": [102.0, 202.0],
+                    "point_wgs84": [-96.34, 30.62],
                     "height_m": 8.0,
                     "canopy_radius_m": 2.0,
                     "shade_ready": False,
@@ -56,6 +61,33 @@ class TreeShadowTests(unittest.TestCase):
         self.assertEqual(len(trees), 1)
         self.assertEqual(trees[0].source_id, 1)
         self.assertEqual(excluded_count, 2)
+
+    def test_metric_polygons_convert_to_campus_map_coordinates(self) -> None:
+        polygon = metric_polygon_to_wgs84(
+            ((100.0, 200.0), (200.0, 300.0), (100.0, 200.0)),
+            center_m=(100.0, 200.0),
+            center_wgs84=(-96.34, 30.62),
+        )
+
+        self.assertEqual(polygon[0], (-96.34, 30.62))
+        self.assertGreater(polygon[1][0], polygon[0][0])
+        self.assertGreater(polygon[1][1], polygon[0][1])
+        self.assertEqual(polygon[0], polygon[-1])
+
+    def test_map_bucket_contains_simplified_wgs84_polygons(self) -> None:
+        bucket = tree_shadow_map_at(datetime(2026, 6, 21, 18, tzinfo=timezone.utc))
+
+        self.assertTrue(bucket.daylight)
+        self.assertEqual(len(bucket.polygons_wgs84), 2_058)
+        self.assertEqual(len(bucket.polygons_wgs84[0]), 11)
+        self.assertEqual(bucket.polygons_wgs84[0][0], bucket.polygons_wgs84[0][-1])
+        self.assertTrue(
+            all(
+                -96.36 < longitude < -96.32 and 30.59 < latitude < 30.64
+                for polygon in bucket.polygons_wgs84
+                for longitude, latitude in polygon
+            )
+        )
 
     def test_canopy_projection_is_a_closed_metric_capsule(self) -> None:
         polygon = tree_shadow_polygon(

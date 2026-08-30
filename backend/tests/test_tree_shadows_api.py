@@ -3,7 +3,7 @@ import unittest
 
 from fastapi import HTTPException
 
-from app.main import get_tree_shadows
+from app.main import get_tree_shadow_map, get_tree_shadows
 
 
 class TreeShadowApiTests(unittest.TestCase):
@@ -36,6 +36,21 @@ class TreeShadowApiTests(unittest.TestCase):
         self.assertEqual(response.shadow_count, 0)
         self.assertEqual(response.shadows, [])
         self.assertEqual(response.maximum_generated_shadow_length_m, 0)
+
+    def test_map_response_is_valid_wgs84_multipolygon(self) -> None:
+        response = get_tree_shadow_map(datetime(2026, 6, 21, 18, tzinfo=timezone.utc))
+        payload = response.model_dump(mode="json")
+
+        self.assertEqual(payload["shadow_count"], 2_058)
+        self.assertEqual(payload["geojson"]["type"], "FeatureCollection")
+        geometry = payload["geojson"]["features"][0]["geometry"]
+        self.assertEqual(geometry["type"], "MultiPolygon")
+        self.assertEqual(len(geometry["coordinates"]), 2_058)
+        first_ring = geometry["coordinates"][0][0]
+        self.assertEqual(len(first_ring), 11)
+        self.assertEqual(first_ring[0], first_ring[-1])
+        self.assertTrue(-96.36 < first_ring[0][0] < -96.32)
+        self.assertTrue(30.59 < first_ring[0][1] < 30.64)
 
     def test_naive_timestamp_returns_bad_request(self) -> None:
         with self.assertRaises(HTTPException) as raised:

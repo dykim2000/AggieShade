@@ -10,10 +10,11 @@ from .models import (
     RouteResponse,
     SolarPositionResponse,
     TreeShadowCollectionResponse,
+    TreeShadowMapResponse,
     building_response,
 )
 from .shade.solar import solar_position
-from .shade.trees import tree_shadows_at
+from .shade.trees import tree_shadow_map_at, tree_shadows_at
 
 
 app = FastAPI(
@@ -61,6 +62,17 @@ def get_tree_shadows(at: datetime) -> TreeShadowCollectionResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return TreeShadowCollectionResponse.from_tree_shadow_bucket(bucket)
+
+
+@app.get("/shade/tree-shadows/map", response_model=TreeShadowMapResponse)
+def get_tree_shadow_map(at: datetime) -> TreeShadowMapResponse:
+    """Return map-optimized WGS 84 tree shadows for Expo."""
+
+    try:
+        bucket = tree_shadow_map_at(at)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return TreeShadowMapResponse.from_tree_shadow_map_bucket(bucket)
 
 
 @app.post("/routes", response_model=RouteResponse)

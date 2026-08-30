@@ -14,6 +14,7 @@ from .solar import SolarPosition, solar_position, time_bucket_start
 
 
 MetricPoint = tuple[float, float]
+Wgs84Point = tuple[float, float]
 SHADE_DATA_PATH = Path(__file__).parents[1] / "data" / "shade_features.json"
 METRIC_CRS = "EPSG:32614"
 CIRCLE_SEGMENTS = 16
@@ -25,6 +26,7 @@ TREE_SHADOW_CACHE_SIZE = 8
 class ShadeTree:
     source_id: int | str
     center_m: MetricPoint
+    center_wgs84: Wgs84Point
     height_m: float
     canopy_radius_m: float
 
@@ -33,6 +35,7 @@ class ShadeTree:
 class TreeShadow:
     tree_id: int | str
     center_m: MetricPoint
+    center_wgs84: Wgs84Point
     height_m: float
     canopy_radius_m: float
     shadow_length_m: float
@@ -58,6 +61,14 @@ class TreeShadowCacheInfo:
     currsize: int
 
 
+@dataclass(frozen=True)
+class TreeShadowMapBucket:
+    bucket_start: datetime
+    daylight: bool
+    shadow_azimuth_degrees: float | None
+    polygons_wgs84: tuple[tuple[Wgs84Point, ...], ...]
+
+
 def shade_ready_trees_from_dataset(
     dataset: Mapping[str, object],
 ) -> tuple[tuple[ShadeTree, ...], int]:
@@ -72,14 +83,24 @@ def shade_ready_trees_from_dataset(
         if not isinstance(raw_tree, Mapping) or raw_tree.get("shade_ready") is not True:
             continue
         point = raw_tree.get("point_m")
+        point_wgs84 = raw_tree.get("point_wgs84")
         source_id = raw_tree.get("source_id")
         try:
-            if not isinstance(point, list) or len(point) != 2 or source_id is None:
+            if (
+                not isinstance(point, list)
+                or len(point) != 2
+                or not isinstance(point_wgs84, list)
+                or len(point_wgs84) != 2
+                or source_id is None
+            ):
                 continue
             center_m = float(point[0]), float(point[1])
+            center_wgs84 = float(point_wgs84[0]), float(point_wgs84[1])
             height_m = float(raw_tree["height_m"])
             canopy_radius_m = float(raw_tree["canopy_radius_m"])
         except (KeyError, TypeError, ValueError):
+            continue
+        if not -180 <= center_wgs84[0] <= 180 or not -90 <= center_wgs84[1] <= 90:
             continue
         if height_m <= 0 or canopy_radius_m <= 0:
             continue
@@ -89,6 +110,7 @@ def shade_ready_trees_from_dataset(
             ShadeTree(
                 source_id=source_id,
                 center_m=center_m,
+                center_wgs84=center_wgs84,
                 height_m=height_m,
                 canopy_radius_m=canopy_radius_m,
             )
@@ -193,6 +215,7 @@ def _tree_shadow_bucket(bucket_start: datetime) -> TreeShadowBucket:
             TreeShadow(
                 tree_id=tree.source_id,
                 center_m=tree.center_m,
+                center_wgs84=tree.center_wgs84,
                 height_m=tree.height_m,
                 canopy_radius_m=tree.canopy_radius_m,
                 shadow_length_m=round(shadow_length, 3),
@@ -216,14 +239,82 @@ def _tree_shadow_bucket(bucket_start: datetime) -> TreeShadowBucket:
     )
 
 
+def metric_polygon_to_wgs84(
+    polygon_m: tuple[MetricPoint, ...],
+    center_m: MetricPoint,
+    center_wgs84: Wgs84Point,
+) -> tuple[Wgs84Point, ...]:
+    """Convert local metric offsets to WGS 84 for lightweight map display."""
+
+    latitude_radians = radians(center_wgs84[1])
+    meters_per_degree_latitude = (
+        111_132.92
+        - 559.82 * cos(2 * latitude_radians)
+        + 1.175 * cos(4 * latitude_radians)
+        - 0.0023 * cos(6 * latitude_radians)
+    )
+    meters_per_degree_longitude = (
+        111_412.84 * cos(latitude_radians)
+        - 93.5 * cos(3 * latitude_radians)
+        + 0.118 * cos(5 * latitude_radians)
+    )
+    return tuple(
+        (
+            round(center_wgs84[0] + (point[0] - center_m[0]) / meters_per_degree_longitude, 7),
+            round(center_wgs84[1] + (point[1] - center_m[1]) / meters_per_degree_latitude, 7),
+        )
+        for point in polygon_m
+    )
+
+
+@lru_cache(maxsize=TREE_SHADOW_CACHE_SIZE)
+def _tree_shadow_map_bucket(bucket_start: datetime) -> TreeShadowMapBucket:
+    bucket = _tree_shadow_bucket(bucket_start)
+    if not bucket.shadows or bucket.solar.shadow_azimuth_degrees is None:
+        return TreeShadowMapBucket(
+            bucket_start=bucket.bucket_start,
+            daylight=bucket.solar.daylight,
+            shadow_azimuth_degrees=bucket.solar.shadow_azimuth_degrees,
+            polygons_wgs84=(),
+        )
+
+    polygons = tuple(
+        metric_polygon_to_wgs84(
+            tree_shadow_polygon(
+                shadow.center_m,
+                shadow.canopy_radius_m,
+                shadow.shadow_length_m,
+                bucket.solar.shadow_azimuth_degrees,
+                circle_segments=8,
+            ),
+            shadow.center_m,
+            shadow.center_wgs84,
+        )
+        for shadow in bucket.shadows
+    )
+    return TreeShadowMapBucket(
+        bucket_start=bucket.bucket_start,
+        daylight=bucket.solar.daylight,
+        shadow_azimuth_degrees=bucket.solar.shadow_azimuth_degrees,
+        polygons_wgs84=polygons,
+    )
+
+
 def tree_shadows_at(observed_at: datetime) -> TreeShadowBucket:
     """Return the cached tree-shadow geometry for an instant's 15-minute bucket."""
 
     return _tree_shadow_bucket(time_bucket_start(observed_at))
 
 
+def tree_shadow_map_at(observed_at: datetime) -> TreeShadowMapBucket:
+    """Return cached, map-optimized WGS 84 polygons for an instant's bucket."""
+
+    return _tree_shadow_map_bucket(time_bucket_start(observed_at))
+
+
 def clear_tree_shadow_cache() -> None:
     _tree_shadow_bucket.cache_clear()
+    _tree_shadow_map_bucket.cache_clear()
 
 
 def tree_shadow_cache_info() -> TreeShadowCacheInfo:

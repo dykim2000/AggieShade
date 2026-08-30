@@ -20,3 +20,26 @@ export type Route = {
   duration_seconds: number;
   geometry: Coordinate[];
 };
+
+export type GeoJsonPosition = [number, number];
+
+export type TreeShadowGeoJson = {
+  type: "FeatureCollection";
+  features: Array<{
+    type: "Feature";
+    properties: Record<string, string>;
+    geometry: {
+      type: "MultiPolygon";
+      coordinates: GeoJsonPosition[][][];
+    };
+  }>;
+};
+
+export type TreeShadowMap = {
+  bucket_start: string;
+  bucket_minutes: number;
+  daylight: boolean;
+  shadow_azimuth_degrees: number | null;
+  shadow_count: number;
+  geojson: TreeShadowGeoJson;
+};
