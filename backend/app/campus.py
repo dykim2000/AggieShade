@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from heapq import heappop, heappush
+import json
 from math import atan2, cos, radians, sin, sqrt
+from pathlib import Path
 
 
 Point = tuple[float, float]
@@ -64,29 +66,6 @@ BUILDINGS: dict[str, Building] = {
     ),
 }
 
-# A deliberately small walkway graph for the milestone-one vertical slice.
-NODES: dict[str, Point] = {
-    **{building.id: building.point for building in BUILDINGS.values()},
-    "north_quad": (30.61930, -96.34135),
-    "library_walk": (30.61675, -96.34115),
-    "military_walk": (30.61420, -96.34125),
-    "rudder_walk": (30.61315, -96.34118),
-}
-
-EDGE_PAIRS = (
-    ("zachry", "north_quad"),
-    ("north_quad", "evans"),
-    ("north_quad", "sbisa"),
-    ("sbisa", "library_walk"),
-    ("evans", "library_walk"),
-    ("library_walk", "academic"),
-    ("library_walk", "military_walk"),
-    ("academic", "military_walk"),
-    ("military_walk", "rudder_walk"),
-    ("rudder_walk", "msc"),
-    ("msc", "kyle"),
-)
-
 
 def _distance_m(first: Point, second: Point) -> float:
     earth_radius_m = 6_371_000
@@ -98,21 +77,71 @@ def _distance_m(first: Point, second: Point) -> float:
     return earth_radius_m * 2 * atan2(sqrt(haversine), sqrt(1 - haversine))
 
 
-GRAPH: dict[str, list[tuple[str, float]]] = {node_id: [] for node_id in NODES}
-for left, right in EDGE_PAIRS:
-    distance = _distance_m(NODES[left], NODES[right])
-    GRAPH[left].append((right, distance))
-    GRAPH[right].append((left, distance))
+def _load_pedestrian_graph() -> tuple[
+    dict[str, Point],
+    dict[str, list[tuple[str, float]]],
+    frozenset[frozenset[str]],
+]:
+    data_path = Path(__file__).with_name("data") / "pedestrian_graph.json"
+    data = json.loads(data_path.read_text(encoding="utf-8"))
+    nodes = {str(node_id): (latitude, longitude) for node_id, latitude, longitude in data["nodes"]}
+    graph: dict[str, list[tuple[str, float]]] = {node_id: [] for node_id in nodes}
+    edge_keys: set[frozenset[str]] = set()
+
+    for left_id, right_id, distance, _highway in data["edges"]:
+        left = str(left_id)
+        right = str(right_id)
+        graph[left].append((right, distance))
+        graph[right].append((left, distance))
+        edge_keys.add(frozenset((left, right)))
+
+    return nodes, graph, frozenset(edge_keys)
 
 
-def _shortest_path(origin_id: str, destination_id: str) -> tuple[list[str], float]:
-    queue: list[tuple[float, str]] = [(0.0, origin_id)]
-    distances = {origin_id: 0.0}
+def _largest_component(graph: dict[str, list[tuple[str, float]]]) -> frozenset[str]:
+    unvisited = set(graph)
+    largest: set[str] = set()
+
+    while unvisited:
+        start = unvisited.pop()
+        component = {start}
+        stack = [start]
+        while stack:
+            node_id = stack.pop()
+            for neighbor, _distance in graph[node_id]:
+                if neighbor in unvisited:
+                    unvisited.remove(neighbor)
+                    component.add(neighbor)
+                    stack.append(neighbor)
+        if len(component) > len(largest):
+            largest = component
+
+    return frozenset(largest)
+
+
+NODES, GRAPH, EDGE_KEYS = _load_pedestrian_graph()
+ROUTABLE_NODE_IDS = _largest_component(GRAPH)
+BUILDING_NODES = {
+    building_id: min(
+        ROUTABLE_NODE_IDS,
+        key=lambda node_id: _distance_m(building.point, NODES[node_id]),
+    )
+    for building_id, building in BUILDINGS.items()
+}
+BUILDING_SNAP_DISTANCE_M = {
+    building_id: _distance_m(BUILDINGS[building_id].point, NODES[node_id])
+    for building_id, node_id in BUILDING_NODES.items()
+}
+
+
+def _shortest_path(origin_node: str, destination_node: str) -> tuple[list[str], float]:
+    queue: list[tuple[float, str]] = [(0.0, origin_node)]
+    distances = {origin_node: 0.0}
     previous: dict[str, str] = {}
 
     while queue:
         distance, node_id = heappop(queue)
-        if node_id == destination_id:
+        if node_id == destination_node:
             break
         if distance != distances[node_id]:
             continue
@@ -123,14 +152,14 @@ def _shortest_path(origin_id: str, destination_id: str) -> tuple[list[str], floa
                 previous[neighbor] = node_id
                 heappush(queue, (candidate, neighbor))
 
-    if destination_id not in distances:
-        raise RuntimeError("No walking route connects these buildings")
+    if destination_node not in distances:
+        raise RuntimeError("No pedestrian route connects these buildings")
 
-    path = [destination_id]
-    while path[-1] != origin_id:
+    path = [destination_node]
+    while path[-1] != origin_node:
         path.append(previous[path[-1]])
     path.reverse()
-    return path, distances[destination_id]
+    return path, distances[destination_node]
 
 
 def route_between(origin_id: str, destination_id: str) -> Route:
@@ -139,7 +168,7 @@ def route_between(origin_id: str, destination_id: str) -> Route:
     if origin_id == destination_id:
         raise ValueError("Choose two different TAMU buildings")
 
-    path, distance = _shortest_path(origin_id, destination_id)
+    path, distance = _shortest_path(BUILDING_NODES[origin_id], BUILDING_NODES[destination_id])
     rounded_distance = round(distance)
     return Route(
         origin_id=origin_id,

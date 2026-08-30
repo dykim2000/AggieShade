@@ -11,7 +11,19 @@ The first milestone is a conventional walking-route demo:
 - calculate the shortest path through a small campus walkway graph; and
 - draw the returned path on the map with distance and ETA.
 
-The embedded graph is intentionally small. It proves the app-to-API-to-map flow before the later TAMU GIS ingestion and shade-scoring milestones.
+Routes follow a bundled pedestrian graph instead of straight building-to-building lines. Buildings are snapped to nearby walkway access points, and the backend runs Dijkstra's algorithm across connected footways, pedestrian paths, crossings, and steps.
+
+## Pedestrian routing data
+
+The bundled graph in `backend/app/data/pedestrian_graph.json` is derived from [OpenStreetMap](https://www.openstreetmap.org/) data and is available under the [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) license. Texas A&M's [official sidewalk layer](https://gis.tamu.edu/arcgis/rest/services/FCOR/TAMU_BaseMap/MapServer/18) can be used for visual validation.
+
+To refresh the graph:
+
+```bash
+curl 'https://api.openstreetmap.org/api/0.6/map?bbox=-96.346,30.609,-96.338,30.6225' -o campus.osm
+cd backend
+python3 scripts/build_pedestrian_graph.py ../campus.osm app/data/pedestrian_graph.json
+```
 
 ## Run the backend
 

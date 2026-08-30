@@ -143,7 +143,7 @@ export default function App() {
           {selectedBuildings.map((building) => (
             <Marker
               key={building.id}
-              coordinate={building.point}
+              coordinate={building.route_point}
               title={building.short_name}
               description={building.name}
               pinColor={building.id === originId ? GREEN : MAROON}

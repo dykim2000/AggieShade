@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 
-from .campus import Building, Route
+from .campus import BUILDING_NODES, NODES, Building, Route
 
 
 class PointResponse(BaseModel):
@@ -13,6 +13,7 @@ class BuildingResponse(BaseModel):
     name: str
     short_name: str
     point: PointResponse
+    route_point: PointResponse
 
 
 class RouteRequest(BaseModel):
@@ -39,9 +40,11 @@ class RouteResponse(BaseModel):
 
 
 def building_response(building: Building) -> BuildingResponse:
+    route_point = NODES[BUILDING_NODES[building.id]]
     return BuildingResponse(
         id=building.id,
         name=building.name,
         short_name=building.short_name,
         point=PointResponse(latitude=building.point[0], longitude=building.point[1]),
+        route_point=PointResponse(latitude=route_point[0], longitude=route_point[1]),
     )

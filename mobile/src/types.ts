@@ -8,6 +8,7 @@ export type Building = {
   name: string;
   short_name: string;
   point: Coordinate;
+  route_point: Coordinate;
 };
 
 export type Route = {
