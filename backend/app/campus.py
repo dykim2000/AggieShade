@@ -15,6 +15,8 @@ class Building:
     id: str
     name: str
     short_name: str
+    building_number: str | None
+    abbreviation: str | None
     point: Point
 
 
@@ -27,44 +29,134 @@ class Route:
     geometry: tuple[Point, ...]
 
 
-BUILDINGS: dict[str, Building] = {
-    "zachry": Building(
-        id="zachry",
-        name="Zachry Engineering Education Complex",
-        short_name="Zachry",
-        point=(30.62142, -96.34079),
-    ),
-    "evans": Building(
-        id="evans",
-        name="Sterling C. Evans Library",
-        short_name="Evans Library",
-        point=(30.61691, -96.33982),
-    ),
-    "academic": Building(
-        id="academic",
-        name="Academic Building",
-        short_name="Academic",
-        point=(30.61559, -96.34086),
-    ),
-    "msc": Building(
-        id="msc",
-        name="Memorial Student Center",
-        short_name="MSC",
-        point=(30.61234, -96.34142),
-    ),
-    "kyle": Building(
-        id="kyle",
-        name="Kyle Field",
-        short_name="Kyle Field",
-        point=(30.61018, -96.34015),
-    ),
-    "sbisa": Building(
-        id="sbisa",
-        name="Sbisa Dining Hall",
-        short_name="Sbisa",
-        point=(30.61793, -96.34424),
-    ),
+COMMON_BUILDING_IDS = {
+    "0518": "zachry",
+    "0468": "evans",
+    "0462": "academic",
+    "0454": "msc",
+    "0367": "kyle",
+    "0495": "sbisa",
 }
+COMMON_SHORT_NAMES = {
+    "zachry": "Zachry",
+    "evans": "Evans Library",
+    "academic": "Academic",
+    "msc": "MSC",
+    "kyle": "Kyle Field",
+    "sbisa": "Sbisa",
+}
+COMMON_BUILDING_ORDER = tuple(COMMON_SHORT_NAMES)
+
+
+def _ring_area_twice(ring: list[list[float]]) -> float:
+    return sum(
+        point[0] * ring[(index + 1) % len(ring)][1]
+        - ring[(index + 1) % len(ring)][0] * point[1]
+        for index, point in enumerate(ring)
+    )
+
+
+def _ring_centroid(ring: list[list[float]]) -> Point:
+    area_twice = _ring_area_twice(ring)
+    if abs(area_twice) < 1e-15:
+        return (
+            sum(point[1] for point in ring) / len(ring),
+            sum(point[0] for point in ring) / len(ring),
+        )
+
+    longitude_sum = 0.0
+    latitude_sum = 0.0
+    for index, point in enumerate(ring):
+        next_point = ring[(index + 1) % len(ring)]
+        cross = point[0] * next_point[1] - next_point[0] * point[1]
+        longitude_sum += (point[0] + next_point[0]) * cross
+        latitude_sum += (point[1] + next_point[1]) * cross
+    return latitude_sum / (3 * area_twice), longitude_sum / (3 * area_twice)
+
+
+def _footprint_center(raw_rings: object) -> Point | None:
+    if not isinstance(raw_rings, list):
+        return None
+
+    rings: list[list[list[float]]] = []
+    for raw_ring in raw_rings:
+        if not isinstance(raw_ring, list) or len(raw_ring) < 4:
+            continue
+        try:
+            ring = [[float(point[0]), float(point[1])] for point in raw_ring]
+        except (IndexError, TypeError, ValueError):
+            continue
+        rings.append(ring)
+
+    if not rings:
+        return None
+    outer_ring = max(rings, key=lambda ring: abs(_ring_area_twice(ring)))
+    return _ring_centroid(outer_ring)
+
+
+def _slug(value: str) -> str:
+    normalized = "".join(
+        character if character.isalnum() else " "
+        for character in value.casefold()
+    )
+    return "-".join(normalized.split())
+
+
+def _load_buildings() -> dict[str, Building]:
+    data_path = Path(__file__).with_name("data") / "shade_features.json"
+    data = json.loads(data_path.read_text(encoding="utf-8"))
+    buildings: list[Building] = []
+    used_ids: set[str] = set()
+
+    for feature in data["buildings"]:
+        name = str(feature.get("name") or "").strip()
+        building_number = str(feature.get("building_number") or "").strip() or None
+        abbreviation = str(feature.get("abbreviation") or "").strip() or None
+        point = _footprint_center(feature.get("footprint_wgs84"))
+        if not name or point is None:
+            continue
+
+        source_id = str(feature.get("source_id") or "unknown")
+        building_id = COMMON_BUILDING_IDS.get(building_number or "")
+        if building_id is None:
+            building_id = f"tamu-{_slug(building_number or source_id)}"
+        if building_id in used_ids:
+            building_id = f"{building_id}-{_slug(source_id)}"
+        used_ids.add(building_id)
+
+        short_name = COMMON_SHORT_NAMES.get(building_id)
+        if short_name is None:
+            short_name = (
+                abbreviation
+                if abbreviation and not abbreviation.replace(".", "").isdigit()
+                else name
+            )
+        buildings.append(
+            Building(
+                id=building_id,
+                name=name,
+                short_name=short_name,
+                building_number=building_number,
+                abbreviation=abbreviation,
+                point=point,
+            )
+        )
+
+    common_order = {
+        building_id: index
+        for index, building_id in enumerate(COMMON_BUILDING_ORDER)
+    }
+    buildings.sort(
+        key=lambda building: (
+            common_order.get(building.id, len(common_order)),
+            building.name.casefold(),
+            building.building_number or "",
+        )
+    )
+    return {building.id: building for building in buildings}
+
+
+BUILDINGS = _load_buildings()
 
 
 def _distance_m(first: Point, second: Point) -> float:

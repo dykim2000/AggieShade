@@ -37,12 +37,33 @@ function formatDuration(seconds: number): string {
   return `${Math.max(1, Math.round(seconds / 60))} min`;
 }
 
-function matchesBuilding(building: Building, query: string): boolean {
+function buildingMatchScore(building: Building, query: string): number | null {
   const search = query.trim().toLocaleLowerCase();
-  if (!search) return false;
-  return [building.name, building.short_name, building.id].some((value) =>
-    value.toLocaleLowerCase().includes(search),
-  );
+  if (!search) return null;
+  const values = [
+    building.name,
+    building.short_name,
+    building.abbreviation,
+    building.building_number,
+    building.id,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.toLocaleLowerCase());
+
+  if (values.some((value) => value === search)) return 0;
+  if (values.some((value) => value.startsWith(search))) return 1;
+  if (values.some((value) => value.split(/\s+/).some((word) => word.startsWith(search)))) {
+    return 2;
+  }
+  return values.some((value) => value.includes(search)) ? 3 : null;
+}
+
+function buildingDetails(building: Building): string {
+  const details = [
+    building.short_name !== building.name ? building.short_name : null,
+    building.building_number ? `Building ${building.building_number}` : null,
+  ];
+  return details.filter((value): value is string => Boolean(value)).join(" · ");
 }
 
 type SearchInputProps = {
@@ -71,6 +92,7 @@ function SearchInput({ active, field, label, value, onChange, onFocus }: SearchI
           placeholder="Search TAMU buildings"
           placeholderTextColor="#9A9087"
           returnKeyType="search"
+          selectTextOnFocus
           style={styles.searchInput}
           value={value}
         />
@@ -98,8 +120,8 @@ export default function App() {
         setBuildings(items);
         setOriginId(items[0]?.id ?? null);
         setDestinationId(items[1]?.id ?? null);
-        setOriginQuery(items[0]?.short_name ?? "");
-        setDestinationQuery(items[1]?.short_name ?? "");
+        setOriginQuery(items[0]?.name ?? "");
+        setDestinationQuery(items[1]?.name ?? "");
       })
       .catch((requestError: unknown) => {
         setError(requestError instanceof Error ? requestError.message : "Could not load campus buildings");
@@ -129,10 +151,19 @@ export default function App() {
     [buildings],
   );
   const activeQuery = activeField === "origin" ? originQuery : destinationQuery;
-  const searchResults = useMemo(
-    () => buildings.filter((building) => matchesBuilding(building, activeQuery)).slice(0, 5),
+  const matchingBuildings = useMemo(
+    () =>
+      buildings
+        .map((building) => ({ building, score: buildingMatchScore(building, activeQuery) }))
+        .filter((match): match is { building: Building; score: number } => match.score !== null)
+        .sort(
+          (left, right) =>
+            left.score - right.score || left.building.name.localeCompare(right.building.name),
+        )
+        .map((match) => match.building),
     [activeQuery, buildings],
   );
+  const searchResults = matchingBuildings.slice(0, 8);
 
   async function requestRoute() {
     if (!originId || !destinationId || originId === destinationId) return;
@@ -165,14 +196,14 @@ export default function App() {
     setError(null);
     if (field === "origin") {
       setOriginId(building.id);
-      setOriginQuery(building.short_name);
+      setOriginQuery(building.name);
       if (building.id === destinationId) {
         setDestinationId(null);
         setDestinationQuery("");
       }
     } else {
       setDestinationId(building.id);
-      setDestinationQuery(building.short_name);
+      setDestinationQuery(building.name);
       if (building.id === originId) {
         setOriginId(null);
         setOriginQuery("");
@@ -195,11 +226,7 @@ export default function App() {
         </View>
       </View>
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={8}
-        style={styles.content}
-      >
+      <View style={styles.content}>
         <View style={styles.mapShell}>
           <MapView ref={mapRef} style={styles.map} initialRegion={TAMU_REGION}>
             {selectedBuildings.map((building) => (
@@ -225,7 +252,11 @@ export default function App() {
           )}
         </View>
 
-        <View style={styles.selectionArea}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={0}
+          style={styles.selectionArea}
+        >
           {loading ? (
             <View style={styles.loadingRow}>
               <ActivityIndicator color={MAROON} />
@@ -235,13 +266,14 @@ export default function App() {
             <>
               <ScrollView
                 contentContainerStyle={styles.panel}
+                keyboardDismissMode="interactive"
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
                 style={styles.panelScroll}
               >
                 <View style={styles.sectionHeading}>
                   <Text style={styles.sectionTitle}>Plan your walk</Text>
-                  <Text style={styles.sectionHint}>Search or choose a common place</Text>
+                  <Text style={styles.sectionHint}>{buildings.length} campus buildings</Text>
                 </View>
 
                 <SearchInput
@@ -264,7 +296,8 @@ export default function App() {
                 {activeQuery.trim() && !activeSelectionId && (
                   <View style={styles.resultsSection}>
                     <Text style={styles.resultsLabel}>
-                      Results for {activeField === "origin" ? "starting point" : "destination"}
+                      {matchingBuildings.length} {matchingBuildings.length === 1 ? "match" : "matches"} for{" "}
+                      {activeField === "origin" ? "starting point" : "destination"}
                     </Text>
                     {searchResults.length ? (
                       searchResults.map((building) => (
@@ -276,9 +309,11 @@ export default function App() {
                         >
                           <View style={styles.resultPin} />
                           <View style={styles.resultCopy}>
-                            <Text style={styles.resultName}>{building.short_name}</Text>
-                            <Text numberOfLines={1} style={styles.resultDescription}>
+                            <Text numberOfLines={1} style={styles.resultName}>
                               {building.name}
+                            </Text>
+                            <Text numberOfLines={1} style={styles.resultDescription}>
+                              {buildingDetails(building)}
                             </Text>
                           </View>
                           <Text style={styles.resultAction}>Choose</Text>
@@ -338,14 +373,14 @@ export default function App() {
                   {routing ? (
                     <ActivityIndicator color="white" />
                   ) : (
-                    <Text style={styles.routeButtonText}>Find pedestrian route</Text>
+                    <Text style={styles.routeButtonText}>Find Route</Text>
                   )}
                 </Pressable>
               </View>
             </>
           )}
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }

@@ -6,7 +6,8 @@ AggieShade is a shade-aware pedestrian navigation project for the Texas A&M camp
 
 The first milestone is a conventional walking-route demo:
 
-- select two TAMU buildings in the Expo mobile app;
+- search across all 114 named buildings in the bundled TAMU campus snapshot;
+- select a starting point and destination in the Expo mobile app;
 - request a route from the FastAPI backend;
 - calculate the shortest path through the bundled campus pedestrian graph; and
 - draw the returned path on the map with distance and ETA.

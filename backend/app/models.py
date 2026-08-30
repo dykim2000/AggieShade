@@ -15,6 +15,8 @@ class BuildingResponse(BaseModel):
     id: str
     name: str
     short_name: str
+    building_number: str | None
+    abbreviation: str | None
     point: PointResponse
     route_point: PointResponse
 
@@ -78,6 +80,8 @@ def building_response(building: Building) -> BuildingResponse:
         id=building.id,
         name=building.name,
         short_name=building.short_name,
+        building_number=building.building_number,
+        abbreviation=building.abbreviation,
         point=PointResponse(latitude=building.point[0], longitude=building.point[1]),
         route_point=PointResponse(latitude=route_point[0], longitude=route_point[1]),
     )
