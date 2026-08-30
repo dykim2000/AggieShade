@@ -35,6 +35,19 @@ python3 scripts/ingest_tamu_gis.py app/data/shade_features.json
 
 The generated file is self-describing. Its `summary` object reports how many trees and buildings are ready for the next solar-shadow phase and why excluded records were rejected.
 
+### Solar position service
+
+The backend calculates solar altitude and azimuth for Texas A&M using NOAA's published approximate solar equations. Requests require a timezone-aware timestamp, are normalized to UTC, and include the start of the corresponding 15-minute cache bucket:
+
+```bash
+curl --get 'http://127.0.0.1:8000/shade/solar-position' \
+  --data-urlencode 'at=2026-06-21T13:00:00-05:00'
+```
+
+The response distinguishes geometric altitude from atmosphere-adjusted apparent altitude. Azimuth is degrees clockwise from true north; `shadow_azimuth_degrees` points in the opposite direction. At night, `daylight` is false and the shadow direction is `null`.
+
+The approximation is intentionally constrained to years 1800-2100 and has been checked against NOAA calculator results for College Station. It is suitable for the project's 15-minute shade buckets; field validation will determine whether a higher-precision solar model is warranted.
+
 ## Pedestrian routing data
 
 The bundled graph in `backend/app/data/pedestrian_graph.json` is derived from [OpenStreetMap](https://www.openstreetmap.org/) data and is available under the [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) license. Texas A&M's [official sidewalk layer](https://gis.tamu.edu/arcgis/rest/services/FCOR/TAMU_BaseMap/MapServer/18) can be used for visual validation.
