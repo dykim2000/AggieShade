@@ -4,13 +4,21 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .campus import BUILDINGS, route_between
-from .models import BuildingResponse, RouteRequest, RouteResponse, SolarPositionResponse, building_response
+from .models import (
+    BuildingResponse,
+    RouteRequest,
+    RouteResponse,
+    SolarPositionResponse,
+    TreeShadowCollectionResponse,
+    building_response,
+)
 from .shade.solar import solar_position
+from .shade.trees import tree_shadows_at
 
 
 app = FastAPI(
     title="AggieShade API",
-    version="0.2.0",
+    version="0.3.0",
     description="Campus routing and shade-modeling services for AggieShade.",
 )
 
@@ -42,6 +50,17 @@ def get_solar_position(at: datetime) -> SolarPositionResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return SolarPositionResponse.from_solar_position(position)
+
+
+@app.get("/shade/tree-shadows", response_model=TreeShadowCollectionResponse)
+def get_tree_shadows(at: datetime) -> TreeShadowCollectionResponse:
+    """Return metric tree-shadow polygons for the instant's 15-minute bucket."""
+
+    try:
+        bucket = tree_shadows_at(at)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return TreeShadowCollectionResponse.from_tree_shadow_bucket(bucket)
 
 
 @app.post("/routes", response_model=RouteResponse)

@@ -49,6 +49,19 @@ The response distinguishes geometric altitude from atmosphere-adjusted apparent 
 
 The approximation is intentionally constrained to years 1800-2100 and has been checked against NOAA calculator results for College Station. It is suitable for the project's 15-minute shade buckets; field validation will determine whether a higher-precision solar model is warranted.
 
+### Tree-shadow service
+
+The tree-shadow model loads all 2,058 shade-ready trees in the bundled snapshot. Each canopy is modeled as a circle with its recorded metric radius, then extended opposite the sun as a capsule-shaped polygon. Shadow length is `tree height / tan(apparent solar altitude)` and is capped at 100 meters near sunrise and sunset. Nighttime requests return an empty shadow list.
+
+Geometry is generated and cached at 15-minute boundaries in UTM zone 14N (`EPSG:32614`). Request a bucket with a timezone-aware timestamp:
+
+```bash
+curl --get 'http://127.0.0.1:8000/shade/tree-shadows' \
+  --data-urlencode 'at=2026-06-21T13:07:00-05:00'
+```
+
+The response reports the bucket time, solar direction, data-quality counts, cap metadata, and one closed metric polygon per eligible tree. The current capsule model intentionally favors fast campus-wide scoring; later field validation can replace it without changing the API's metric-coordinate contract.
+
 ## Pedestrian routing data
 
 The bundled graph in `backend/app/data/pedestrian_graph.json` is derived from [OpenStreetMap](https://www.openstreetmap.org/) data and is available under the [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) license. Texas A&M's [official sidewalk layer](https://gis.tamu.edu/arcgis/rest/services/FCOR/TAMU_BaseMap/MapServer/18) can be used for visual validation.

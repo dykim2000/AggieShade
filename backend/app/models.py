@@ -3,12 +3,18 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from .campus import BUILDING_NODES, NODES, Building, Route
-from .shade.solar import SOLAR_REFERENCE_URL, SolarPosition
+from .shade.solar import SOLAR_REFERENCE_URL, TIME_BUCKET_MINUTES, SolarPosition
+from .shade.trees import MAX_TREE_SHADOW_LENGTH_M, TreeShadow, TreeShadowBucket
 
 
 class PointResponse(BaseModel):
     latitude: float
     longitude: float
+
+
+class MetricPointResponse(BaseModel):
+    easting: float
+    northing: float
 
 
 class BuildingResponse(BaseModel):
@@ -71,6 +77,72 @@ class SolarPositionResponse(BaseModel):
             daylight=position.daylight,
             method=position.method,
             reference_url=SOLAR_REFERENCE_URL,
+        )
+
+
+class TreeShadowResponse(BaseModel):
+    tree_id: int | str
+    center_m: MetricPointResponse
+    height_m: float
+    canopy_radius_m: float
+    shadow_length_m: float
+    length_capped: bool
+    polygon_m: list[MetricPointResponse]
+
+    @classmethod
+    def from_tree_shadow(cls, shadow: TreeShadow) -> "TreeShadowResponse":
+        return cls(
+            tree_id=shadow.tree_id,
+            center_m=MetricPointResponse(
+                easting=shadow.center_m[0],
+                northing=shadow.center_m[1],
+            ),
+            height_m=shadow.height_m,
+            canopy_radius_m=shadow.canopy_radius_m,
+            shadow_length_m=shadow.shadow_length_m,
+            length_capped=shadow.length_capped,
+            polygon_m=[
+                MetricPointResponse(easting=point[0], northing=point[1])
+                for point in shadow.polygon_m
+            ],
+        )
+
+
+class TreeShadowCollectionResponse(BaseModel):
+    bucket_start: datetime
+    bucket_minutes: int
+    crs: str
+    daylight: bool
+    solar_altitude_degrees: float
+    shadow_azimuth_degrees: float | None
+    eligible_tree_count: int
+    excluded_tree_count: int
+    shadow_count: int
+    shadow_length_cap_m: float
+    maximum_generated_shadow_length_m: float
+    shadows: list[TreeShadowResponse]
+
+    @classmethod
+    def from_tree_shadow_bucket(
+        cls,
+        bucket: TreeShadowBucket,
+    ) -> "TreeShadowCollectionResponse":
+        return cls(
+            bucket_start=bucket.bucket_start,
+            bucket_minutes=TIME_BUCKET_MINUTES,
+            crs=bucket.crs,
+            daylight=bucket.solar.daylight,
+            solar_altitude_degrees=bucket.solar.apparent_altitude_degrees,
+            shadow_azimuth_degrees=bucket.solar.shadow_azimuth_degrees,
+            eligible_tree_count=bucket.eligible_tree_count,
+            excluded_tree_count=bucket.excluded_tree_count,
+            shadow_count=len(bucket.shadows),
+            shadow_length_cap_m=MAX_TREE_SHADOW_LENGTH_M,
+            maximum_generated_shadow_length_m=max(
+                (shadow.shadow_length_m for shadow in bucket.shadows),
+                default=0,
+            ),
+            shadows=[TreeShadowResponse.from_tree_shadow(shadow) for shadow in bucket.shadows],
         )
 
 
