@@ -2,7 +2,6 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   InteractionManager,
-  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -110,11 +109,12 @@ type SearchInputProps = {
   field: SearchField;
   label: string;
   value: string;
+  onBlur: (field: SearchField) => void;
   onChange: (value: string) => void;
   onFocus: (field: SearchField) => void;
 };
 
-function SearchInput({ active, field, label, value, onChange, onFocus }: SearchInputProps) {
+function SearchInput({ active, field, label, value, onBlur, onChange, onFocus }: SearchInputProps) {
   return (
     <View style={styles.searchGroup}>
       <Text style={styles.searchLabel}>{label}</Text>
@@ -126,6 +126,7 @@ function SearchInput({ active, field, label, value, onChange, onFocus }: SearchI
           accessibilityLabel={`Search ${label.toLocaleLowerCase()}`}
           autoCorrect={false}
           clearButtonMode="while-editing"
+          onBlur={() => onBlur(field)}
           onChangeText={onChange}
           onFocus={() => onFocus(field)}
           placeholder="Search TAMU buildings"
@@ -193,6 +194,7 @@ function SearchResults({
 
 export default function App() {
   const mapRef = useRef<MapView>(null);
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [originId, setOriginId] = useState<string | null>(null);
   const [destinationId, setDestinationId] = useState<string | null>(null);
@@ -206,7 +208,7 @@ export default function App() {
   const [treeShadowMap, setTreeShadowMap] = useState<TreeShadowMap | null>(null);
   const [shadeLoading, setShadeLoading] = useState(true);
   const [shadeError, setShadeError] = useState(false);
-  const [searchMode, setSearchMode] = useState(false);
+  const [focusedField, setFocusedField] = useState<SearchField | null>(null);
 
   useEffect(() => {
     getBuildings()
@@ -223,22 +225,12 @@ export default function App() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSubscription = Keyboard.addListener(showEvent, (event) => {
-      Keyboard.scheduleLayoutAnimation(event);
-      setSearchMode(true);
-    });
-    const hideSubscription = Keyboard.addListener(hideEvent, (event) => {
-      Keyboard.scheduleLayoutAnimation(event);
-      setSearchMode(false);
-    });
-    return () => {
-      showSubscription.remove();
-      hideSubscription.remove();
-    };
-  }, []);
+  useEffect(
+    () => () => {
+      if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     let active = true;
@@ -340,7 +332,20 @@ export default function App() {
   }
 
   function focusSearchField(field: SearchField) {
+    if (blurTimerRef.current) {
+      clearTimeout(blurTimerRef.current);
+      blurTimerRef.current = null;
+    }
     setActiveField(field);
+    setFocusedField(field);
+  }
+
+  function blurSearchField(field: SearchField) {
+    if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+    blurTimerRef.current = setTimeout(() => {
+      setFocusedField((currentField) => (currentField === field ? null : currentField));
+      blurTimerRef.current = null;
+    }, 0);
   }
 
   function selectBuilding(building: Building, field: SearchField = activeField) {
@@ -441,117 +446,122 @@ export default function App() {
           </View>
         </View>
 
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={0}
-          style={[styles.selectionArea, searchMode && styles.selectionAreaFocused]}
-        >
-          {loading ? (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator color={MAROON} />
-              <Text style={styles.muted}>Loading campus buildings…</Text>
-            </View>
-          ) : (
-            <>
-              <ScrollView
-                contentContainerStyle={styles.panel}
-                keyboardDismissMode="interactive"
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-                style={styles.panelScroll}
-              >
-                <View style={styles.commonSection}>
-                  <View style={styles.commonHeading}>
-                    <Text style={styles.commonTitle}>Common Places</Text>
-                    <Text style={styles.commonTarget}>
-                      Choosing for {activeField === "origin" ? "Start" : "Destination"}
-                    </Text>
-                  </View>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.chipRow}
-                    keyboardShouldPersistTaps="handled"
-                  >
-                    {commonPlaces.map((building) => {
-                      const selected = building.id === activeSelectionId;
-                      return (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityState={{ selected }}
-                          key={building.id}
-                          onPress={() => selectBuilding(building)}
-                          style={[styles.chip, selected && styles.chipSelected]}
-                        >
-                          <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                            {building.short_name}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
-
-                <SearchInput
-                  active={activeField === "origin"}
-                  field="origin"
-                  label="Starting point"
-                  onChange={(value) => updateQuery("origin", value)}
-                  onFocus={focusSearchField}
-                  value={originQuery}
-                />
-                {activeField === "origin" && (
-                  <SearchResults
-                    field="origin"
-                    matchingBuildings={matchingBuildings}
-                    onSelect={(building) => selectBuilding(building, "origin")}
-                    query={originQuery}
-                    results={searchResults}
-                    selectionId={originId}
-                  />
-                )}
-                <SearchInput
-                  active={activeField === "destination"}
-                  field="destination"
-                  label="Destination"
-                  onChange={(value) => updateQuery("destination", value)}
-                  onFocus={focusSearchField}
-                  value={destinationQuery}
-                />
-                {activeField === "destination" && (
-                  <SearchResults
-                    field="destination"
-                    matchingBuildings={matchingBuildings}
-                    onSelect={(building) => selectBuilding(building, "destination")}
-                    query={destinationQuery}
-                    results={searchResults}
-                    selectionId={destinationId}
-                  />
-                )}
-              </ScrollView>
-
-              <View style={styles.actionArea}>
-                {error && <Text style={styles.error}>{error}</Text>}
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={!canRoute}
-                  onPress={requestRoute}
-                  style={({ pressed }) => [
-                    styles.routeButton,
-                    !canRoute && styles.routeButtonDisabled,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  {routing ? (
-                    <ActivityIndicator color="white" />
-                  ) : (
-                    <Text style={styles.routeButtonText}>Find Route</Text>
-                  )}
-                </Pressable>
+        <View style={[styles.selectionArea, focusedField && styles.selectionAreaFocused]}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            enabled={Platform.OS === "ios"}
+            keyboardVerticalOffset={0}
+            style={styles.keyboardPanel}
+          >
+            {loading ? (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator color={MAROON} />
+                <Text style={styles.muted}>Loading campus buildings…</Text>
               </View>
-            </>
-          )}
-        </KeyboardAvoidingView>
+            ) : (
+              <>
+                <ScrollView
+                  contentContainerStyle={styles.panel}
+                  keyboardDismissMode="interactive"
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  style={styles.panelScroll}
+                >
+                  <View style={styles.commonSection}>
+                    <View style={styles.commonHeading}>
+                      <Text style={styles.commonTitle}>Common Places</Text>
+                      <Text style={styles.commonTarget}>
+                        Choosing for {activeField === "origin" ? "Start" : "Destination"}
+                      </Text>
+                    </View>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.chipRow}
+                      keyboardShouldPersistTaps="handled"
+                    >
+                      {commonPlaces.map((building) => {
+                        const selected = building.id === activeSelectionId;
+                        return (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityState={{ selected }}
+                            key={building.id}
+                            onPress={() => selectBuilding(building)}
+                            style={[styles.chip, selected && styles.chipSelected]}
+                          >
+                            <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                              {building.short_name}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+
+                  <SearchInput
+                    active={activeField === "origin"}
+                    field="origin"
+                    label="Starting point"
+                    onBlur={blurSearchField}
+                    onChange={(value) => updateQuery("origin", value)}
+                    onFocus={focusSearchField}
+                    value={originQuery}
+                  />
+                  {activeField === "origin" && (
+                    <SearchResults
+                      field="origin"
+                      matchingBuildings={matchingBuildings}
+                      onSelect={(building) => selectBuilding(building, "origin")}
+                      query={originQuery}
+                      results={searchResults}
+                      selectionId={originId}
+                    />
+                  )}
+                  <SearchInput
+                    active={activeField === "destination"}
+                    field="destination"
+                    label="Destination"
+                    onBlur={blurSearchField}
+                    onChange={(value) => updateQuery("destination", value)}
+                    onFocus={focusSearchField}
+                    value={destinationQuery}
+                  />
+                  {activeField === "destination" && (
+                    <SearchResults
+                      field="destination"
+                      matchingBuildings={matchingBuildings}
+                      onSelect={(building) => selectBuilding(building, "destination")}
+                      query={destinationQuery}
+                      results={searchResults}
+                      selectionId={destinationId}
+                    />
+                  )}
+                </ScrollView>
+
+                <View style={styles.actionArea}>
+                  {error && <Text style={styles.error}>{error}</Text>}
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={!canRoute}
+                    onPress={requestRoute}
+                    style={({ pressed }) => [
+                      styles.routeButton,
+                      !canRoute && styles.routeButtonDisabled,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    {routing ? (
+                      <ActivityIndicator color="white" />
+                    ) : (
+                      <Text style={styles.routeButtonText}>Find Route</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </KeyboardAvoidingView>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -626,6 +636,7 @@ const styles = StyleSheet.create({
     marginTop: 0,
     backgroundColor: "#F8F6F1",
   },
+  keyboardPanel: { flex: 1 },
   panelScroll: { flex: 1 },
   panel: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, gap: 11 },
   searchGroup: { gap: 5 },
