@@ -212,9 +212,13 @@ export default function App() {
   }, [route]);
 
   const canRoute = Boolean(originId && destinationId && originId !== destinationId && !routing);
-  const selectedBuildings = useMemo(
-    () => buildings.filter((building) => building.id === originId || building.id === destinationId),
-    [buildings, destinationId, originId],
+  const originBuilding = useMemo(
+    () => buildings.find((building) => building.id === originId) ?? null,
+    [buildings, originId],
+  );
+  const destinationBuilding = useMemo(
+    () => buildings.find((building) => building.id === destinationId) ?? null,
+    [buildings, destinationId],
   );
   const commonPlaces = useMemo(
     () =>
@@ -304,25 +308,40 @@ export default function App() {
         <View style={styles.mapShell}>
           <MapView ref={mapRef} style={styles.map} initialRegion={TAMU_REGION}>
             {treeShadowMap?.shadow_count ? <ShadowOverlay geojson={treeShadowMap.geojson} /> : null}
-            {selectedBuildings.map((building) => (
-              <Marker
-                key={building.id}
-                coordinate={building.route_point}
-                title={building.short_name}
-                description={building.name}
-                pinColor={building.id === originId ? GREEN : MAROON}
-                zIndex={5}
-              />
-            ))}
-            {route && (
-              <Polyline
-                coordinates={route.geometry}
-                strokeColor={MAROON}
-                strokeWidth={6}
-                lineCap="round"
-                zIndex={4}
-              />
-            )}
+            <Polyline
+              coordinates={route?.geometry ?? []}
+              strokeColor="rgba(255,255,255,0.96)"
+              strokeWidth={9}
+              lineCap="round"
+              lineJoin="round"
+              zIndex={20}
+            />
+            <Polyline
+              coordinates={route?.geometry ?? []}
+              strokeColor={MAROON}
+              strokeWidth={5}
+              lineCap="round"
+              lineJoin="round"
+              zIndex={21}
+            />
+            <Marker
+              key="origin-marker"
+              coordinate={originBuilding?.route_point ?? TAMU_REGION}
+              title={originBuilding?.short_name}
+              description={originBuilding?.name}
+              opacity={originBuilding ? 1 : 0}
+              pinColor={GREEN}
+              zIndex={30}
+            />
+            <Marker
+              key="destination-marker"
+              coordinate={destinationBuilding?.route_point ?? TAMU_REGION}
+              title={destinationBuilding?.short_name}
+              description={destinationBuilding?.name}
+              opacity={destinationBuilding ? 1 : 0}
+              pinColor={MAROON}
+              zIndex={31}
+            />
           </MapView>
           {route && (
             <View style={styles.routeCard}>
