@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   InteractionManager,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -139,6 +140,57 @@ function SearchInput({ active, field, label, value, onChange, onFocus }: SearchI
   );
 }
 
+type SearchResultsProps = {
+  field: SearchField;
+  matchingBuildings: Building[];
+  onSelect: (building: Building) => void;
+  query: string;
+  results: Building[];
+  selectionId: string | null;
+};
+
+function SearchResults({
+  field,
+  matchingBuildings,
+  onSelect,
+  query,
+  results,
+  selectionId,
+}: SearchResultsProps) {
+  if (!query.trim() || selectionId) return null;
+  return (
+    <View style={styles.resultsSection}>
+      <Text style={styles.resultsLabel}>
+        {matchingBuildings.length} {matchingBuildings.length === 1 ? "match" : "matches"} for{" "}
+        {field === "origin" ? "starting point" : "destination"}
+      </Text>
+      {results.length ? (
+        results.map((building) => (
+          <Pressable
+            accessibilityRole="button"
+            key={building.id}
+            onPress={() => onSelect(building)}
+            style={({ pressed }) => [styles.resultRow, pressed && styles.pressed]}
+          >
+            <View style={styles.resultPin} />
+            <View style={styles.resultCopy}>
+              <Text numberOfLines={1} style={styles.resultName}>
+                {building.name}
+              </Text>
+              <Text numberOfLines={1} style={styles.resultDescription}>
+                {buildingDetails(building)}
+              </Text>
+            </View>
+            <Text style={styles.resultAction}>Choose</Text>
+          </Pressable>
+        ))
+      ) : (
+        <Text style={styles.noResults}>No matching campus buildings</Text>
+      )}
+    </View>
+  );
+}
+
 export default function App() {
   const mapRef = useRef<MapView>(null);
   const [buildings, setBuildings] = useState<Building[]>([]);
@@ -154,6 +206,7 @@ export default function App() {
   const [treeShadowMap, setTreeShadowMap] = useState<TreeShadowMap | null>(null);
   const [shadeLoading, setShadeLoading] = useState(true);
   const [shadeError, setShadeError] = useState(false);
+  const [searchMode, setSearchMode] = useState(false);
 
   useEffect(() => {
     getBuildings()
@@ -168,6 +221,23 @@ export default function App() {
         setError(requestError instanceof Error ? requestError.message : "Could not load campus buildings");
       })
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      Keyboard.scheduleLayoutAnimation(event);
+      setSearchMode(true);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, (event) => {
+      Keyboard.scheduleLayoutAnimation(event);
+      setSearchMode(false);
+    });
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -269,6 +339,10 @@ export default function App() {
     }
   }
 
+  function focusSearchField(field: SearchField) {
+    setActiveField(field);
+  }
+
   function selectBuilding(building: Building, field: SearchField = activeField) {
     setRoute(null);
     setError(null);
@@ -294,17 +368,16 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" />
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.eyebrow}>TEXAS A&M CAMPUS</Text>
-          <Text style={styles.title}>AggieShade</Text>
-        </View>
-        <View style={styles.milestoneBadge}>
-          <Text style={styles.milestoneText}>WALKING ROUTES</Text>
-        </View>
-      </View>
-
       <View style={styles.content}>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.eyebrow}>TEXAS A&M CAMPUS</Text>
+            <Text style={styles.title}>AggieShade</Text>
+          </View>
+          <View style={styles.milestoneBadge}>
+            <Text style={styles.milestoneText}>WALKING ROUTES</Text>
+          </View>
+        </View>
         <View style={styles.mapShell}>
           <MapView ref={mapRef} style={styles.map} initialRegion={TAMU_REGION}>
             {treeShadowMap?.shadow_count ? <ShadowOverlay geojson={treeShadowMap.geojson} /> : null}
@@ -371,7 +444,7 @@ export default function App() {
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           keyboardVerticalOffset={0}
-          style={styles.selectionArea}
+          style={[styles.selectionArea, searchMode && styles.selectionAreaFocused]}
         >
           {loading ? (
             <View style={styles.loadingRow}>
@@ -387,63 +460,9 @@ export default function App() {
                 showsVerticalScrollIndicator={false}
                 style={styles.panelScroll}
               >
-                <View style={styles.sectionHeading}>
-                  <Text style={styles.sectionTitle}>Plan your walk</Text>
-                  <Text style={styles.sectionHint}>{buildings.length} campus buildings</Text>
-                </View>
-
-                <SearchInput
-                  active={activeField === "origin"}
-                  field="origin"
-                  label="Starting point"
-                  onChange={(value) => updateQuery("origin", value)}
-                  onFocus={setActiveField}
-                  value={originQuery}
-                />
-                <SearchInput
-                  active={activeField === "destination"}
-                  field="destination"
-                  label="Destination"
-                  onChange={(value) => updateQuery("destination", value)}
-                  onFocus={setActiveField}
-                  value={destinationQuery}
-                />
-
-                {activeQuery.trim() && !activeSelectionId && (
-                  <View style={styles.resultsSection}>
-                    <Text style={styles.resultsLabel}>
-                      {matchingBuildings.length} {matchingBuildings.length === 1 ? "match" : "matches"} for{" "}
-                      {activeField === "origin" ? "starting point" : "destination"}
-                    </Text>
-                    {searchResults.length ? (
-                      searchResults.map((building) => (
-                        <Pressable
-                          accessibilityRole="button"
-                          key={building.id}
-                          onPress={() => selectBuilding(building)}
-                          style={({ pressed }) => [styles.resultRow, pressed && styles.pressed]}
-                        >
-                          <View style={styles.resultPin} />
-                          <View style={styles.resultCopy}>
-                            <Text numberOfLines={1} style={styles.resultName}>
-                              {building.name}
-                            </Text>
-                            <Text numberOfLines={1} style={styles.resultDescription}>
-                              {buildingDetails(building)}
-                            </Text>
-                          </View>
-                          <Text style={styles.resultAction}>Choose</Text>
-                        </Pressable>
-                      ))
-                    ) : (
-                      <Text style={styles.noResults}>No matching campus buildings</Text>
-                    )}
-                  </View>
-                )}
-
                 <View style={styles.commonSection}>
                   <View style={styles.commonHeading}>
-                    <Text style={styles.commonTitle}>Common places</Text>
+                    <Text style={styles.commonTitle}>Common Places</Text>
                     <Text style={styles.commonTarget}>
                       Choosing for {activeField === "origin" ? "Start" : "Destination"}
                     </Text>
@@ -472,6 +491,43 @@ export default function App() {
                     })}
                   </ScrollView>
                 </View>
+
+                <SearchInput
+                  active={activeField === "origin"}
+                  field="origin"
+                  label="Starting point"
+                  onChange={(value) => updateQuery("origin", value)}
+                  onFocus={focusSearchField}
+                  value={originQuery}
+                />
+                {activeField === "origin" && (
+                  <SearchResults
+                    field="origin"
+                    matchingBuildings={matchingBuildings}
+                    onSelect={(building) => selectBuilding(building, "origin")}
+                    query={originQuery}
+                    results={searchResults}
+                    selectionId={originId}
+                  />
+                )}
+                <SearchInput
+                  active={activeField === "destination"}
+                  field="destination"
+                  label="Destination"
+                  onChange={(value) => updateQuery("destination", value)}
+                  onFocus={focusSearchField}
+                  value={destinationQuery}
+                />
+                {activeField === "destination" && (
+                  <SearchResults
+                    field="destination"
+                    matchingBuildings={matchingBuildings}
+                    onSelect={(building) => selectBuilding(building, "destination")}
+                    query={destinationQuery}
+                    results={searchResults}
+                    selectionId={destinationId}
+                  />
+                )}
               </ScrollView>
 
               <View style={styles.actionArea}>
@@ -559,11 +615,19 @@ const styles = StyleSheet.create({
   shadeDotInactive: { backgroundColor: "#9A9087" },
   shadeText: { flex: 1, color: "#4B433D", fontSize: 10, fontWeight: "700" },
   selectionArea: { flex: 1, marginTop: 6 },
+  selectionAreaFocused: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 100,
+    elevation: 100,
+    marginTop: 0,
+    backgroundColor: "#F8F6F1",
+  },
   panelScroll: { flex: 1 },
   panel: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, gap: 11 },
-  sectionHeading: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" },
-  sectionTitle: { color: "#2F2924", fontSize: 18, fontWeight: "800" },
-  sectionHint: { color: "#7B7168", fontSize: 11 },
   searchGroup: { gap: 5 },
   searchLabel: { color: "#62574D", fontSize: 11, fontWeight: "700" },
   searchShell: {
