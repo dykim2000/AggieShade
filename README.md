@@ -8,7 +8,7 @@ The first milestone is a conventional walking-route demo:
 
 - select two TAMU buildings in the Expo mobile app;
 - request a route from the FastAPI backend;
-- calculate the shortest path through a small campus walkway graph; and
+- calculate the shortest path through the bundled campus pedestrian graph; and
 - draw the returned path on the map with distance and ETA.
 
 Routes follow a bundled pedestrian graph instead of straight building-to-building lines. Buildings are snapped to nearby walkway access points, and the backend runs Dijkstra's algorithm across connected footways, pedestrian paths, crossings, and steps.

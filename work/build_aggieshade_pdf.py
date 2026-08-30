@@ -1,13 +1,10 @@
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    PageBreak, KeepTogether, HRFlowable, Flowable, Preformatted)
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfgen import canvas
+    PageBreak, HRFlowable, Flowable, Preformatted)
 from pathlib import Path
 
 OUT = Path('/Users/daeyeon/Documents/ChatGPT/AggieShade/output/pdf/AggieShade_Development_Plan.pdf')
