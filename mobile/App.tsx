@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import MapView, { Marker, Polyline } from "react-native-maps";
@@ -16,12 +19,15 @@ import type { Building, Route } from "./src/types";
 
 const MAROON = "#500000";
 const GREEN = "#287052";
+const COMMON_PLACE_IDS = ["msc", "evans", "zachry", "kyle", "academic", "sbisa"];
 const TAMU_REGION = {
   latitude: 30.6168,
   longitude: -96.3411,
   latitudeDelta: 0.014,
   longitudeDelta: 0.012,
 };
+
+type SearchField = "origin" | "destination";
 
 function formatDistance(meters: number): string {
   return meters < 1000 ? `${meters} m` : `${(meters / 1000).toFixed(1)} km`;
@@ -31,33 +37,44 @@ function formatDuration(seconds: number): string {
   return `${Math.max(1, Math.round(seconds / 60))} min`;
 }
 
-type BuildingRowProps = {
+function matchesBuilding(building: Building, query: string): boolean {
+  const search = query.trim().toLocaleLowerCase();
+  if (!search) return false;
+  return [building.name, building.short_name, building.id].some((value) =>
+    value.toLocaleLowerCase().includes(search),
+  );
+}
+
+type SearchInputProps = {
+  active: boolean;
+  field: SearchField;
   label: string;
-  buildings: Building[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
+  value: string;
+  onChange: (value: string) => void;
+  onFocus: (field: SearchField) => void;
 };
 
-function BuildingRow({ label, buildings, selectedId, onSelect }: BuildingRowProps) {
+function SearchInput({ active, field, label, value, onChange, onFocus }: SearchInputProps) {
   return (
-    <View style={styles.selectorGroup}>
-      <Text style={styles.selectorLabel}>{label}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-        {buildings.map((building) => {
-          const selected = selectedId === building.id;
-          return (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              key={building.id}
-              onPress={() => onSelect(building.id)}
-              style={[styles.chip, selected && styles.chipSelected]}
-            >
-              <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{building.short_name}</Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+    <View style={styles.searchGroup}>
+      <Text style={styles.searchLabel}>{label}</Text>
+      <View style={[styles.searchShell, active && styles.searchShellActive]}>
+        <View style={[styles.fieldBadge, field === "origin" ? styles.originBadge : styles.destinationBadge]}>
+          <Text style={styles.fieldBadgeText}>{field === "origin" ? "A" : "B"}</Text>
+        </View>
+        <TextInput
+          accessibilityLabel={`Search ${label.toLocaleLowerCase()}`}
+          autoCorrect={false}
+          clearButtonMode="while-editing"
+          onChangeText={onChange}
+          onFocus={() => onFocus(field)}
+          placeholder="Search TAMU buildings"
+          placeholderTextColor="#9A9087"
+          returnKeyType="search"
+          style={styles.searchInput}
+          value={value}
+        />
+      </View>
     </View>
   );
 }
@@ -67,6 +84,9 @@ export default function App() {
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [originId, setOriginId] = useState<string | null>(null);
   const [destinationId, setDestinationId] = useState<string | null>(null);
+  const [originQuery, setOriginQuery] = useState("");
+  const [destinationQuery, setDestinationQuery] = useState("");
+  const [activeField, setActiveField] = useState<SearchField>("destination");
   const [route, setRoute] = useState<Route | null>(null);
   const [loading, setLoading] = useState(true);
   const [routing, setRouting] = useState(false);
@@ -78,6 +98,8 @@ export default function App() {
         setBuildings(items);
         setOriginId(items[0]?.id ?? null);
         setDestinationId(items[1]?.id ?? null);
+        setOriginQuery(items[0]?.short_name ?? "");
+        setDestinationQuery(items[1]?.short_name ?? "");
       })
       .catch((requestError: unknown) => {
         setError(requestError instanceof Error ? requestError.message : "Could not load campus buildings");
@@ -99,6 +121,18 @@ export default function App() {
     () => buildings.filter((building) => building.id === originId || building.id === destinationId),
     [buildings, destinationId, originId],
   );
+  const commonPlaces = useMemo(
+    () =>
+      COMMON_PLACE_IDS.map((id) => buildings.find((building) => building.id === id)).filter(
+        (building): building is Building => Boolean(building),
+      ),
+    [buildings],
+  );
+  const activeQuery = activeField === "origin" ? originQuery : destinationQuery;
+  const searchResults = useMemo(
+    () => buildings.filter((building) => matchesBuilding(building, activeQuery)).slice(0, 5),
+    [activeQuery, buildings],
+  );
 
   async function requestRoute() {
     if (!originId || !destinationId || originId === destinationId) return;
@@ -113,17 +147,40 @@ export default function App() {
     }
   }
 
-  function selectOrigin(id: string) {
-    setOriginId(id);
+  function updateQuery(field: SearchField, value: string) {
+    setActiveField(field);
     setRoute(null);
-    if (id === destinationId) setDestinationId(null);
+    setError(null);
+    if (field === "origin") {
+      setOriginQuery(value);
+      setOriginId(null);
+    } else {
+      setDestinationQuery(value);
+      setDestinationId(null);
+    }
   }
 
-  function selectDestination(id: string) {
-    setDestinationId(id);
+  function selectBuilding(building: Building, field: SearchField = activeField) {
     setRoute(null);
-    if (id === originId) setOriginId(null);
+    setError(null);
+    if (field === "origin") {
+      setOriginId(building.id);
+      setOriginQuery(building.short_name);
+      if (building.id === destinationId) {
+        setDestinationId(null);
+        setDestinationQuery("");
+      }
+    } else {
+      setDestinationId(building.id);
+      setDestinationQuery(building.short_name);
+      if (building.id === originId) {
+        setOriginId(null);
+        setOriginQuery("");
+      }
+    }
   }
+
+  const activeSelectionId = activeField === "origin" ? originId : destinationId;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -134,81 +191,178 @@ export default function App() {
           <Text style={styles.title}>AggieShade</Text>
         </View>
         <View style={styles.milestoneBadge}>
-          <Text style={styles.milestoneText}>MILESTONE 1</Text>
+          <Text style={styles.milestoneText}>WALKING ROUTES</Text>
         </View>
       </View>
 
-      <View style={styles.mapShell}>
-        <MapView ref={mapRef} style={styles.map} initialRegion={TAMU_REGION}>
-          {selectedBuildings.map((building) => (
-            <Marker
-              key={building.id}
-              coordinate={building.route_point}
-              title={building.short_name}
-              description={building.name}
-              pinColor={building.id === originId ? GREEN : MAROON}
-            />
-          ))}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={8}
+        style={styles.content}
+      >
+        <View style={styles.mapShell}>
+          <MapView ref={mapRef} style={styles.map} initialRegion={TAMU_REGION}>
+            {selectedBuildings.map((building) => (
+              <Marker
+                key={building.id}
+                coordinate={building.route_point}
+                title={building.short_name}
+                description={building.name}
+                pinColor={building.id === originId ? GREEN : MAROON}
+              />
+            ))}
+            {route && (
+              <Polyline coordinates={route.geometry} strokeColor={MAROON} strokeWidth={6} lineCap="round" />
+            )}
+          </MapView>
           {route && (
-            <Polyline coordinates={route.geometry} strokeColor={MAROON} strokeWidth={6} lineCap="round" />
+            <View style={styles.routeCard}>
+              <Text style={styles.routeCardLabel}>PEDESTRIAN ROUTE</Text>
+              <Text style={styles.routeCardValue}>
+                {formatDuration(route.duration_seconds)} · {formatDistance(route.distance_m)}
+              </Text>
+            </View>
           )}
-        </MapView>
-        {route && (
-          <View style={styles.routeCard}>
-            <Text style={styles.routeCardLabel}>FASTEST WALK</Text>
-            <Text style={styles.routeCardValue}>
-              {formatDuration(route.duration_seconds)} · {formatDistance(route.distance_m)}
-            </Text>
-          </View>
-        )}
-      </View>
+        </View>
 
-      <View style={styles.panel}>
-        {loading ? (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator color={MAROON} />
-            <Text style={styles.muted}>Loading campus buildings…</Text>
-          </View>
-        ) : (
-          <>
-            <BuildingRow label="Start" buildings={buildings} selectedId={originId} onSelect={selectOrigin} />
-            <BuildingRow
-              label="Destination"
-              buildings={buildings}
-              selectedId={destinationId}
-              onSelect={selectDestination}
-            />
-            {error && <Text style={styles.error}>{error}</Text>}
-            <Pressable
-              accessibilityRole="button"
-              disabled={!canRoute}
-              onPress={requestRoute}
-              style={({ pressed }) => [
-                styles.routeButton,
-                !canRoute && styles.routeButtonDisabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              {routing ? <ActivityIndicator color="white" /> : <Text style={styles.routeButtonText}>Find walking route</Text>}
-            </Pressable>
-          </>
-        )}
-      </View>
+        <View style={styles.selectionArea}>
+          {loading ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator color={MAROON} />
+              <Text style={styles.muted}>Loading campus buildings…</Text>
+            </View>
+          ) : (
+            <>
+              <ScrollView
+                contentContainerStyle={styles.panel}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                style={styles.panelScroll}
+              >
+                <View style={styles.sectionHeading}>
+                  <Text style={styles.sectionTitle}>Plan your walk</Text>
+                  <Text style={styles.sectionHint}>Search or choose a common place</Text>
+                </View>
+
+                <SearchInput
+                  active={activeField === "origin"}
+                  field="origin"
+                  label="Starting point"
+                  onChange={(value) => updateQuery("origin", value)}
+                  onFocus={setActiveField}
+                  value={originQuery}
+                />
+                <SearchInput
+                  active={activeField === "destination"}
+                  field="destination"
+                  label="Destination"
+                  onChange={(value) => updateQuery("destination", value)}
+                  onFocus={setActiveField}
+                  value={destinationQuery}
+                />
+
+                {activeQuery.trim() && !activeSelectionId && (
+                  <View style={styles.resultsSection}>
+                    <Text style={styles.resultsLabel}>
+                      Results for {activeField === "origin" ? "starting point" : "destination"}
+                    </Text>
+                    {searchResults.length ? (
+                      searchResults.map((building) => (
+                        <Pressable
+                          accessibilityRole="button"
+                          key={building.id}
+                          onPress={() => selectBuilding(building)}
+                          style={({ pressed }) => [styles.resultRow, pressed && styles.pressed]}
+                        >
+                          <View style={styles.resultPin} />
+                          <View style={styles.resultCopy}>
+                            <Text style={styles.resultName}>{building.short_name}</Text>
+                            <Text numberOfLines={1} style={styles.resultDescription}>
+                              {building.name}
+                            </Text>
+                          </View>
+                          <Text style={styles.resultAction}>Choose</Text>
+                        </Pressable>
+                      ))
+                    ) : (
+                      <Text style={styles.noResults}>No matching campus buildings</Text>
+                    )}
+                  </View>
+                )}
+
+                <View style={styles.commonSection}>
+                  <View style={styles.commonHeading}>
+                    <Text style={styles.commonTitle}>Common places</Text>
+                    <Text style={styles.commonTarget}>
+                      Choosing for {activeField === "origin" ? "Start" : "Destination"}
+                    </Text>
+                  </View>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.chipRow}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {commonPlaces.map((building) => {
+                      const selected = building.id === activeSelectionId;
+                      return (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityState={{ selected }}
+                          key={building.id}
+                          onPress={() => selectBuilding(building)}
+                          style={[styles.chip, selected && styles.chipSelected]}
+                        >
+                          <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                            {building.short_name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              </ScrollView>
+
+              <View style={styles.actionArea}>
+                {error && <Text style={styles.error}>{error}</Text>}
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={!canRoute}
+                  onPress={requestRoute}
+                  style={({ pressed }) => [
+                    styles.routeButton,
+                    !canRoute && styles.routeButtonDisabled,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  {routing ? (
+                    <ActivityIndicator color="white" />
+                  ) : (
+                    <Text style={styles.routeButtonText}>Find pedestrian route</Text>
+                  )}
+                </Pressable>
+              </View>
+            </>
+          )}
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#F8F6F1" },
+  content: { flex: 1 },
   header: {
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingTop: 8,
+    paddingBottom: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  eyebrow: { color: GREEN, fontSize: 11, fontWeight: "700", letterSpacing: 1.4 },
-  title: { color: MAROON, fontSize: 30, fontWeight: "800", letterSpacing: -0.7 },
+  eyebrow: { color: GREEN, fontSize: 10, fontWeight: "700", letterSpacing: 1.4 },
+  title: { color: MAROON, fontSize: 28, fontWeight: "800", letterSpacing: -0.7 },
   milestoneBadge: {
     borderColor: "#D7C8B9",
     borderWidth: 1,
@@ -216,29 +370,93 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  milestoneText: { color: "#6F6258", fontSize: 10, fontWeight: "700", letterSpacing: 0.8 },
+  milestoneText: { color: "#6F6258", fontSize: 9, fontWeight: "700", letterSpacing: 0.7 },
   mapShell: {
-    flex: 1,
+    height: "38%",
+    minHeight: 205,
     marginHorizontal: 14,
-    borderRadius: 22,
+    borderRadius: 20,
     overflow: "hidden",
     backgroundColor: "#E8E3D8",
   },
   map: { flex: 1 },
   routeCard: {
     position: "absolute",
-    top: 14,
-    left: 14,
+    top: 12,
+    left: 12,
     backgroundColor: "rgba(255,255,255,0.96)",
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderRadius: 13,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
   },
-  routeCardLabel: { color: GREEN, fontSize: 10, fontWeight: "800", letterSpacing: 1 },
-  routeCardValue: { color: MAROON, fontSize: 18, fontWeight: "800", marginTop: 2 },
-  panel: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12, gap: 12 },
-  selectorGroup: { gap: 6 },
-  selectorLabel: { color: "#62574D", fontSize: 12, fontWeight: "700" },
+  routeCardLabel: { color: GREEN, fontSize: 9, fontWeight: "800", letterSpacing: 1 },
+  routeCardValue: { color: MAROON, fontSize: 17, fontWeight: "800", marginTop: 2 },
+  selectionArea: { flex: 1, marginTop: 6 },
+  panelScroll: { flex: 1 },
+  panel: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, gap: 11 },
+  sectionHeading: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" },
+  sectionTitle: { color: "#2F2924", fontSize: 18, fontWeight: "800" },
+  sectionHint: { color: "#7B7168", fontSize: 11 },
+  searchGroup: { gap: 5 },
+  searchLabel: { color: "#62574D", fontSize: 11, fontWeight: "700" },
+  searchShell: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: "#D7C8B9",
+    borderRadius: 14,
+    backgroundColor: "white",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 11,
+  },
+  searchShellActive: { borderColor: MAROON, borderWidth: 2, paddingHorizontal: 10 },
+  fieldBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 9,
+  },
+  originBadge: { backgroundColor: GREEN },
+  destinationBadge: { backgroundColor: MAROON },
+  fieldBadgeText: { color: "white", fontSize: 11, fontWeight: "800" },
+  searchInput: { flex: 1, color: "#2F2924", fontSize: 15, paddingVertical: 10 },
+  resultsSection: {
+    borderWidth: 1,
+    borderColor: "#E1D8CF",
+    borderRadius: 14,
+    overflow: "hidden",
+    backgroundColor: "white",
+  },
+  resultsLabel: {
+    color: "#746A62",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    paddingHorizontal: 12,
+    paddingTop: 9,
+    paddingBottom: 5,
+    textTransform: "uppercase",
+  },
+  resultRow: {
+    minHeight: 49,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#E8E1DA",
+  },
+  resultPin: { width: 8, height: 8, borderRadius: 4, backgroundColor: GREEN, marginRight: 10 },
+  resultCopy: { flex: 1, paddingVertical: 7 },
+  resultName: { color: "#332D28", fontSize: 14, fontWeight: "700" },
+  resultDescription: { color: "#81766D", fontSize: 11, marginTop: 1 },
+  resultAction: { color: MAROON, fontSize: 11, fontWeight: "800", marginLeft: 8 },
+  noResults: { color: "#81766D", fontSize: 13, paddingHorizontal: 12, paddingVertical: 14 },
+  commonSection: { gap: 7 },
+  commonHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  commonTitle: { color: "#62574D", fontSize: 12, fontWeight: "800" },
+  commonTarget: { color: GREEN, fontSize: 10, fontWeight: "700" },
   chipRow: { gap: 8, paddingRight: 16 },
   chip: {
     borderColor: "#D7C8B9",
@@ -251,9 +469,18 @@ const styles = StyleSheet.create({
   chipSelected: { borderColor: MAROON, backgroundColor: MAROON },
   chipText: { color: "#4B433D", fontSize: 13, fontWeight: "600" },
   chipTextSelected: { color: "white" },
-  loadingRow: { minHeight: 80, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 },
+  actionArea: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#DED5CC",
+    backgroundColor: "#F8F6F1",
+    gap: 6,
+  },
+  loadingRow: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 },
   muted: { color: "#746A62" },
-  error: { color: "#A32626", fontSize: 13 },
+  error: { color: "#A32626", fontSize: 12 },
   routeButton: {
     minHeight: 48,
     borderRadius: 14,
@@ -263,5 +490,5 @@ const styles = StyleSheet.create({
   },
   routeButtonDisabled: { opacity: 0.45 },
   routeButtonText: { color: "white", fontSize: 15, fontWeight: "800" },
-  pressed: { opacity: 0.8 },
+  pressed: { opacity: 0.75 },
 });
