@@ -124,6 +124,11 @@ pnpm install
 pnpm start
 ```
 
+When using VS Code, press `Cmd+Shift+B` on macOS (`Ctrl+Shift+B` on Windows or
+Linux) to run the default `AggieShade: Start App` task. It starts Uvicorn and
+Expo in separate VS Code integrated terminals. Keep both tasks running while
+testing on a phone, and terminate both tasks when you are finished.
+
 The default API URL is `http://127.0.0.1:8000`. For a physical phone, create `mobile/.env` and point it at the computer's LAN address:
 
 ```text

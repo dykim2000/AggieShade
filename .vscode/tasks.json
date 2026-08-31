@@ -1,0 +1,54 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "AggieShade: Backend",
+      "type": "shell",
+      "command": "if [ -x \"${env:HOME}/Library/Caches/AggieShade/backend-venv/bin/uvicorn\" ]; then exec \"${env:HOME}/Library/Caches/AggieShade/backend-venv/bin/uvicorn\" app.main:app --host 0.0.0.0 --port 8000; else exec \"${workspaceFolder}/backend/.venv/bin/uvicorn\" app.main:app --host 0.0.0.0 --port 8000; fi",
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
+      "windows": {
+        "command": "${workspaceFolder}\\backend\\.venv\\Scripts\\uvicorn.exe",
+        "args": ["app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false
+      },
+      "runOptions": {
+        "instanceLimit": 1
+      }
+    },
+    {
+      "label": "AggieShade: Expo",
+      "type": "shell",
+      "command": "npm",
+      "args": ["start", "--", "--lan"],
+      "options": {
+        "cwd": "${workspaceFolder}/mobile"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false
+      },
+      "runOptions": {
+        "instanceLimit": 1
+      }
+    },
+    {
+      "label": "AggieShade: Start App",
+      "dependsOn": ["AggieShade: Backend", "AggieShade: Expo"],
+      "dependsOrder": "parallel",
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import { memo, type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -277,20 +277,26 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchReady, setSearchReady] = useState(false);
 
-  useEffect(() => {
-    getBuildings()
-      .then((items) => {
-        setBuildings(items);
-        setOriginId(items[0]?.id ?? null);
-        setDestinationId(items[1]?.id ?? null);
-        setOriginQuery(items[0]?.name ?? "");
-        setDestinationQuery(items[1]?.name ?? "");
-      })
-      .catch((requestError: unknown) => {
-        setError(requestError instanceof Error ? requestError.message : "Could not load campus buildings");
-      })
-      .finally(() => setLoading(false));
+  const loadCampusBuildings = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const items = await getBuildings();
+      setBuildings(items);
+      setOriginId(items[0]?.id ?? null);
+      setDestinationId(items[1]?.id ?? null);
+      setOriginQuery(items[0]?.name ?? "");
+      setDestinationQuery(items[1]?.name ?? "");
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : "Could not load campus buildings");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadCampusBuildings();
+  }, [loadCampusBuildings]);
 
   useEffect(() => {
     if (!searchOpen || !searchReady) return;
@@ -681,31 +687,43 @@ export default function App() {
                 <View style={styles.actionArea}>
                   {error && <Text style={styles.error}>{error}</Text>}
                   <View style={styles.actionButtons}>
-                    {searchOpen && (
+                    {!buildings.length && error ? (
                       <Pressable
                         accessibilityRole="button"
-                        onPress={closeSearch}
-                        style={({ pressed }) => [styles.doneButton, pressed && styles.pressed]}
+                        onPress={() => void loadCampusBuildings()}
+                        style={({ pressed }) => [styles.routeButton, pressed && styles.pressed]}
                       >
-                        <Text style={styles.doneButtonText}>Done</Text>
+                        <Text style={styles.routeButtonText}>Retry Connection</Text>
                       </Pressable>
+                    ) : (
+                      <>
+                        {searchOpen && (
+                          <Pressable
+                            accessibilityRole="button"
+                            onPress={closeSearch}
+                            style={({ pressed }) => [styles.doneButton, pressed && styles.pressed]}
+                          >
+                            <Text style={styles.doneButtonText}>Done</Text>
+                          </Pressable>
+                        )}
+                        <Pressable
+                          accessibilityRole="button"
+                          disabled={!canRoute}
+                          onPress={requestRoute}
+                          style={({ pressed }) => [
+                            styles.routeButton,
+                            !canRoute && styles.routeButtonDisabled,
+                            pressed && styles.pressed,
+                          ]}
+                        >
+                          {routing ? (
+                            <ActivityIndicator color="white" />
+                          ) : (
+                            <Text style={styles.routeButtonText}>Find Route</Text>
+                          )}
+                        </Pressable>
+                      </>
                     )}
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={!canRoute}
-                      onPress={requestRoute}
-                      style={({ pressed }) => [
-                        styles.routeButton,
-                        !canRoute && styles.routeButtonDisabled,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      {routing ? (
-                        <ActivityIndicator color="white" />
-                      ) : (
-                        <Text style={styles.routeButtonText}>Find Route</Text>
-                      )}
-                    </Pressable>
                   </View>
                 </View>
               </>
