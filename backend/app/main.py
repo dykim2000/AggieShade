@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from .campus import BUILDINGS, route_between
+from .campus import BUILDINGS
 from .models import (
     BuildingShadowCollectionResponse,
     BuildingShadowMapResponse,
@@ -16,13 +16,14 @@ from .models import (
     building_response,
 )
 from .shade.buildings import building_shadow_map_at, building_shadows_at
+from .shade.routing import shade_route_between
 from .shade.solar import solar_position
 from .shade.trees import tree_shadow_map_at, tree_shadows_at
 
 
 app = FastAPI(
     title="AggieShade API",
-    version="0.4.0",
+    version="0.5.0",
     description="Campus routing and shade-modeling services for AggieShade.",
 )
 
@@ -103,7 +104,12 @@ def get_building_shadow_map(at: datetime) -> BuildingShadowMapResponse:
 @app.post("/routes", response_model=RouteResponse)
 def create_route(request: RouteRequest) -> RouteResponse:
     try:
-        route = route_between(request.origin_id, request.destination_id)
+        route = shade_route_between(
+            request.origin_id,
+            request.destination_id,
+            preference=request.preference,
+            observed_at=request.at,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Unknown TAMU building") from exc
     except ValueError as exc:

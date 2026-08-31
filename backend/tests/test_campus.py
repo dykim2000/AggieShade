@@ -46,6 +46,10 @@ class CampusRoutingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             route_between("zachry", "zachry")
 
+    def test_distinct_buildings_at_same_access_point_are_rejected(self) -> None:
+        with self.assertRaises(RuntimeError):
+            route_between("tamu-1427", "tamu-0426")
+
     def test_unknown_building_is_rejected(self) -> None:
         with self.assertRaises(KeyError):
             route_between("not-a-building", "zachry")

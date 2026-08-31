@@ -1,4 +1,10 @@
-import type { Building, BuildingShadowMap, Route, TreeShadowMap } from "./types";
+import type {
+  Building,
+  BuildingShadowMap,
+  Route,
+  RoutePreference,
+  TreeShadowMap,
+} from "./types";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -31,11 +37,21 @@ export async function getBuildings(): Promise<Building[]> {
   return parseResponse<Building[]>(await request(`${API_URL}/buildings`));
 }
 
-export async function getRoute(originId: string, destinationId: string): Promise<Route> {
+export async function getRoute(
+  originId: string,
+  destinationId: string,
+  preference: RoutePreference,
+  at: Date,
+): Promise<Route> {
   const response = await request(`${API_URL}/routes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ origin_id: originId, destination_id: destinationId }),
+    body: JSON.stringify({
+      origin_id: originId,
+      destination_id: destinationId,
+      preference,
+      at: at.toISOString(),
+    }),
   });
   return parseResponse<Route>(response);
 }

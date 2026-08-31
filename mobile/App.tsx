@@ -26,6 +26,7 @@ import type {
   BuildingShadowGeoJson,
   BuildingShadowMap,
   Route,
+  RoutePreference,
   TreeShadowGeoJson,
   TreeShadowMap,
 } from "./src/types";
@@ -33,7 +34,7 @@ import type {
 const MAROON = "#500000";
 const GREEN = "#287052";
 const SHEET_TOP = 68;
-const SHEET_PEEK_HEIGHT = 310;
+const SHEET_PEEK_HEIGHT = 380;
 const COMMON_PLACE_IDS = ["msc", "evans", "zachry", "kyle", "academic", "sbisa"];
 const TAMU_REGION = {
   latitude: 30.6168,
@@ -269,6 +270,7 @@ export default function App() {
   const sheetPositionRef = useRef(estimatedCollapsedOffset);
   const sheetDragStartRef = useRef(estimatedCollapsedOffset);
   const pendingFocusRef = useRef<SearchField | null>(null);
+  const routeRequestIdRef = useRef(0);
   const [sheetHeight, setSheetHeight] = useState(0);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [originId, setOriginId] = useState<string | null>(null);
@@ -277,6 +279,7 @@ export default function App() {
   const [destinationQuery, setDestinationQuery] = useState("");
   const [activeField, setActiveField] = useState<SearchField>("destination");
   const [route, setRoute] = useState<Route | null>(null);
+  const [routePreference, setRoutePreference] = useState<RoutePreference>("shadiest");
   const [loading, setLoading] = useState(true);
   const [routing, setRouting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -437,19 +440,26 @@ export default function App() {
 
   async function requestRoute() {
     if (!originId || !destinationId || originId === destinationId) return;
+    const requestId = routeRequestIdRef.current + 1;
+    routeRequestIdRef.current = requestId;
     closeSearch();
     setRouting(true);
     setError(null);
     try {
-      setRoute(await getRoute(originId, destinationId));
+      const nextRoute = await getRoute(originId, destinationId, routePreference, new Date());
+      if (requestId === routeRequestIdRef.current) setRoute(nextRoute);
     } catch (requestError: unknown) {
-      setError(requestError instanceof Error ? requestError.message : "Could not calculate the route");
+      if (requestId === routeRequestIdRef.current) {
+        setError(requestError instanceof Error ? requestError.message : "Could not calculate the route");
+      }
     } finally {
-      setRouting(false);
+      if (requestId === routeRequestIdRef.current) setRouting(false);
     }
   }
 
   function updateQuery(field: SearchField, value: string) {
+    routeRequestIdRef.current += 1;
+    setRouting(false);
     setActiveField(field);
     setRoute(null);
     setError(null);
@@ -460,6 +470,15 @@ export default function App() {
       setDestinationQuery(value);
       setDestinationId(null);
     }
+  }
+
+  function updateRoutePreference(preference: RoutePreference) {
+    if (preference === routePreference) return;
+    routeRequestIdRef.current += 1;
+    setRouting(false);
+    setRoutePreference(preference);
+    setRoute(null);
+    setError(null);
   }
 
   function dismissKeyboard() {
@@ -504,6 +523,8 @@ export default function App() {
   }
 
   function selectBuilding(building: Building, field: SearchField = activeField) {
+    routeRequestIdRef.current += 1;
+    setRouting(false);
     setRoute(null);
     setError(null);
     if (field === "origin") {
@@ -626,9 +647,16 @@ export default function App() {
 
           {route && (
             <View pointerEvents="none" style={styles.routeCard}>
-              <Text style={styles.routeCardLabel}>PEDESTRIAN ROUTE</Text>
+              <Text style={styles.routeCardLabel}>
+                {route.preference === "shadiest" ? "SHADIEST ROUTE" : "FASTEST ROUTE"}
+              </Text>
               <Text style={styles.routeCardValue}>
                 {formatDuration(route.duration_seconds)} · {formatDistance(route.distance_m)}
+              </Text>
+              <Text style={styles.routeCardShade}>
+                {route.daylight
+                  ? `${route.shade_percentage.toFixed(0)}% shaded · ${formatDistance(route.shaded_distance_m)} in shade`
+                  : "Nighttime · shade routing inactive"}
               </Text>
             </View>
           )}
@@ -715,6 +743,38 @@ export default function App() {
                       onOpen={openSearch}
                       value={destinationQuery}
                     />
+
+                    <View style={styles.preferenceGroup}>
+                      <Text style={styles.searchLabel}>Route preference</Text>
+                      <View accessibilityRole="radiogroup" style={styles.preferenceControl}>
+                        {(["fastest", "shadiest"] as const).map((preference) => {
+                          const selected = preference === routePreference;
+                          return (
+                            <Pressable
+                              accessibilityRole="radio"
+                              accessibilityState={{ disabled: routing, selected }}
+                              disabled={routing}
+                              key={preference}
+                              onPress={() => updateRoutePreference(preference)}
+                              style={({ pressed }) => [
+                                styles.preferenceButton,
+                                selected && styles.preferenceButtonSelected,
+                                pressed && styles.pressed,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.preferenceButtonText,
+                                  selected && styles.preferenceButtonTextSelected,
+                                ]}
+                              >
+                                {preference === "fastest" ? "Fastest" : "Shadiest"}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
 
                     <View style={styles.actionArea}>
                       {error && <Text numberOfLines={2} style={styles.error}>{error}</Text>}
@@ -871,6 +931,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 13,
     paddingVertical: 9,
+    minWidth: 190,
     shadowColor: "#2F2924",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.12,
@@ -879,6 +940,7 @@ const styles = StyleSheet.create({
   },
   routeCardLabel: { color: GREEN, fontSize: 9, fontWeight: "800", letterSpacing: 1 },
   routeCardValue: { color: MAROON, fontSize: 17, fontWeight: "800", marginTop: 2 },
+  routeCardShade: { color: "#62574D", fontSize: 11, fontWeight: "700", marginTop: 3 },
   shadeCard: {
     position: "absolute",
     right: 14,
@@ -988,6 +1050,32 @@ const styles = StyleSheet.create({
   fieldBadgeText: { color: "white", fontSize: 11, fontWeight: "800" },
   searchInput: { flex: 1, color: "#2F2924", fontSize: 15, paddingVertical: 10 },
   searchOpenTarget: { ...StyleSheet.absoluteFillObject, zIndex: 1, borderRadius: 14 },
+  preferenceGroup: { gap: 3 },
+  preferenceControl: {
+    minHeight: 40,
+    padding: 3,
+    borderRadius: 13,
+    backgroundColor: "#EDE7E0",
+    flexDirection: "row",
+    gap: 3,
+  },
+  preferenceButton: {
+    flex: 1,
+    minHeight: 34,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  preferenceButtonSelected: {
+    backgroundColor: "white",
+    shadowColor: "#2F2924",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  preferenceButtonText: { color: "#746A62", fontSize: 13, fontWeight: "700" },
+  preferenceButtonTextSelected: { color: MAROON, fontWeight: "800" },
   resultsSection: {
     borderWidth: 1,
     borderColor: "#E1D8CF",

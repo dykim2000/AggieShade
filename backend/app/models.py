@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .campus import BUILDING_NODES, NODES, Building, Route
+from .campus import BUILDING_NODES, NODES, Building
 from .shade.buildings import (
     MAX_BUILDING_SHADOW_LENGTH_M,
     BuildingShadow,
@@ -11,6 +11,7 @@ from .shade.buildings import (
     BuildingShadowMapBucket,
 )
 from .shade.solar import SOLAR_REFERENCE_URL, TIME_BUCKET_MINUTES, SolarPosition
+from .shade.routing import RoutePreference, ShadeRoute
 from .shade.trees import (
     MAX_TREE_SHADOW_LENGTH_M,
     TreeShadow,
@@ -42,22 +43,34 @@ class BuildingResponse(BaseModel):
 class RouteRequest(BaseModel):
     origin_id: str
     destination_id: str
+    preference: RoutePreference
+    at: datetime
 
 
 class RouteResponse(BaseModel):
     origin_id: str
     destination_id: str
+    preference: RoutePreference
     distance_m: int
     duration_seconds: int
+    shaded_distance_m: int
+    shade_percentage: float = Field(ge=0, le=100)
+    shade_bucket_start: datetime
+    daylight: bool
     geometry: list[PointResponse]
 
     @classmethod
-    def from_route(cls, route: Route) -> "RouteResponse":
+    def from_route(cls, route: ShadeRoute) -> "RouteResponse":
         return cls(
             origin_id=route.origin_id,
             destination_id=route.destination_id,
+            preference=route.preference,
             distance_m=route.distance_m,
             duration_seconds=route.duration_seconds,
+            shaded_distance_m=route.shaded_distance_m,
+            shade_percentage=route.shade_percentage,
+            shade_bucket_start=route.shade_bucket_start,
+            daylight=route.daylight,
             geometry=[PointResponse(latitude=point[0], longitude=point[1]) for point in route.geometry],
         )
 

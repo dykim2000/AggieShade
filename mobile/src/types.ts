@@ -13,11 +13,18 @@ export type Building = {
   route_point: Coordinate;
 };
 
+export type RoutePreference = "fastest" | "shadiest";
+
 export type Route = {
   origin_id: string;
   destination_id: string;
+  preference: RoutePreference;
   distance_m: number;
   duration_seconds: number;
+  shaded_distance_m: number;
+  shade_percentage: number;
+  shade_bucket_start: string;
+  daylight: boolean;
   geometry: Coordinate[];
 };
 

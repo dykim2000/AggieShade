@@ -84,7 +84,31 @@ curl --get 'http://127.0.0.1:8000/shade/building-shadows/map' \
   --data-urlencode 'at=2026-06-21T13:07:00-05:00'
 ```
 
-The Expo app consumes the map endpoint and renders live building shadows with the tree-shadow overlay. Both layers change direction and length with the current solar bucket and disappear at night. The next milestone is to combine tree and building coverage to score pedestrian edges; route selection is not shade-weighted yet.
+The Expo app consumes the map endpoint and renders live building shadows with the tree-shadow overlay. Both layers change direction and length with the current solar bucket and disappear at night.
+
+### Shade-aware pedestrian routing
+
+The route service projects all 2,535 pedestrian edges into the same UTM zone 14N coordinate system as the shadow models. For each 15-minute bucket, it dissolves overlapping tree and building shadows, measures the unique shaded fraction of every walkway, and caches those edge scores. This prevents overlapping tree canopies or building shadows from being counted twice.
+
+The mobile app offers two preferences:
+
+- **Fastest** minimizes physical walking distance while still reporting estimated shade coverage.
+- **Shadiest** discounts the routing cost of each shaded meter by 70%, balancing additional shade against walking distance while keeping every edge cost positive.
+
+Request a time-aware route with:
+
+```bash
+curl 'http://127.0.0.1:8000/routes' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "origin_id": "zachry",
+    "destination_id": "msc",
+    "preference": "shadiest",
+    "at": "2026-06-21T13:07:00-05:00"
+  }'
+```
+
+The response includes physical distance, ETA, shaded distance, shade percentage, daylight status, the normalized shade-bucket time, and route geometry. At night, both preferences intentionally return the same shortest path with 0% modeled solar shade. Fastest and shadiest routes may also be identical when no useful shaded alternative exists. Trees and buildings excluded by the source-data quality rules are conservatively treated as unshaded, so coverage remains an estimate pending field validation.
 
 ## Pedestrian routing data
 

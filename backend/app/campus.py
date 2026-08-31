@@ -5,6 +5,7 @@ from heapq import heappop, heappush
 import json
 from math import atan2, cos, radians, sin, sqrt
 from pathlib import Path
+from typing import Mapping
 
 
 Point = tuple[float, float]
@@ -212,6 +213,11 @@ def _largest_component(graph: dict[str, list[tuple[str, float]]]) -> frozenset[s
 
 
 NODES, GRAPH, EDGE_KEYS = _load_pedestrian_graph()
+EDGE_DISTANCES_M = {
+    frozenset((node_id, neighbor)): distance
+    for node_id, neighbors in GRAPH.items()
+    for neighbor, distance in neighbors
+}
 ROUTABLE_NODE_IDS = _largest_component(GRAPH)
 BUILDING_NODES = {
     building_id: min(
@@ -226,32 +232,42 @@ BUILDING_SNAP_DISTANCE_M = {
 }
 
 
-def _shortest_path(origin_node: str, destination_node: str) -> tuple[list[str], float]:
+def _shortest_path(
+    origin_node: str,
+    destination_node: str,
+    edge_costs: Mapping[frozenset[str], float] | None = None,
+) -> tuple[list[str], float]:
     queue: list[tuple[float, str]] = [(0.0, origin_node)]
-    distances = {origin_node: 0.0}
+    costs = {origin_node: 0.0}
     previous: dict[str, str] = {}
 
     while queue:
-        distance, node_id = heappop(queue)
+        cost, node_id = heappop(queue)
         if node_id == destination_node:
             break
-        if distance != distances[node_id]:
+        if cost != costs[node_id]:
             continue
         for neighbor, edge_distance in GRAPH[node_id]:
-            candidate = distance + edge_distance
-            if candidate < distances.get(neighbor, float("inf")):
-                distances[neighbor] = candidate
+            edge_key = frozenset((node_id, neighbor))
+            traversal_cost = edge_costs[edge_key] if edge_costs is not None else edge_distance
+            candidate = cost + traversal_cost
+            if candidate < costs.get(neighbor, float("inf")):
+                costs[neighbor] = candidate
                 previous[neighbor] = node_id
                 heappush(queue, (candidate, neighbor))
 
-    if destination_node not in distances:
+    if destination_node not in costs:
         raise RuntimeError("No pedestrian route connects these buildings")
 
     path = [destination_node]
     while path[-1] != origin_node:
         path.append(previous[path[-1]])
     path.reverse()
-    return path, distances[destination_node]
+    distance = sum(
+        EDGE_DISTANCES_M[frozenset((left, right))]
+        for left, right in zip(path, path[1:])
+    )
+    return path, distance
 
 
 def route_between(origin_id: str, destination_id: str) -> Route:
@@ -259,6 +275,10 @@ def route_between(origin_id: str, destination_id: str) -> Route:
         raise KeyError("Unknown TAMU building")
     if origin_id == destination_id:
         raise ValueError("Choose two different TAMU buildings")
+    if BUILDING_NODES[origin_id] == BUILDING_NODES[destination_id]:
+        raise RuntimeError(
+            "These buildings share the same pedestrian access point; no distinct route can be drawn"
+        )
 
     path, distance = _shortest_path(BUILDING_NODES[origin_id], BUILDING_NODES[destination_id])
     rounded_distance = round(distance)
