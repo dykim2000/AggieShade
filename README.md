@@ -105,10 +105,16 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 The API is available at `http://127.0.0.1:8000`, with interactive docs at `/docs`.
+For reliable physical-phone testing, leave `--reload` off. In a cloud-synced macOS
+Documents folder, file hydration can look like repeated source changes and trap
+Uvicorn in a reload loop. Add `--reload` only when the repository and virtual
+environment are stored locally. Keep generated environments such as `.venv` and
+`mobile/node_modules` on local storage as well; cloud-offloaded dependency files
+can make Python or Expo stall during startup.
 
 ## Run the mobile app
 
