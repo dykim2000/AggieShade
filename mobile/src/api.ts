@@ -1,4 +1,4 @@
-import type { Building, Route, TreeShadowMap } from "./types";
+import type { Building, BuildingShadowMap, Route, TreeShadowMap } from "./types";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -27,5 +27,12 @@ export async function getTreeShadowMap(at: Date): Promise<TreeShadowMap> {
   const timestamp = encodeURIComponent(at.toISOString());
   return parseResponse<TreeShadowMap>(
     await fetch(`${API_URL}/shade/tree-shadows/map?at=${timestamp}`),
+  );
+}
+
+export async function getBuildingShadowMap(at: Date): Promise<BuildingShadowMap> {
+  const timestamp = encodeURIComponent(at.toISOString());
+  return parseResponse<BuildingShadowMap>(
+    await fetch(`${API_URL}/shade/building-shadows/map?at=${timestamp}`),
   );
 }

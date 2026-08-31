@@ -64,6 +64,28 @@ The response reports the bucket time, solar direction, data-quality counts, cap 
 
 The Expo map also requests `/shade/tree-shadows/map` after its initial interactions settle. That endpoint returns simplified WGS 84 polygons as one GeoJSON multipolygon, allowing the app to display the current bucket without recalculating the full metric response or rerendering the overlay when a search field receives focus. The overlay refreshes every 15 minutes and reports nighttime or connection status directly on the map.
 
+### Building-shadow service (Week 9)
+
+The building-shadow model uses the 109 shade-ready campus buildings in the bundled snapshot; 62 additional records are retained for provenance but excluded because they do not have a floor count. Eligible building heights are estimated as `floor_count * 3.5 meters`, matching the documented ingestion assumption.
+
+For each building, the service sweeps the exact metric footprint opposite the sun instead of approximating it with a bounding box or convex hull. This preserves concave outlines, courtyard holes, and multipart buildings while extending the roof footprint by `building height / tan(apparent solar altitude)`. Like tree shadows, building geometry is generated and cached in 15-minute buckets, and shadow lengths are capped at 100 meters near sunrise and sunset. Nighttime requests return an empty shadow list.
+
+Request the full UTM zone 14N (`EPSG:32614`) metric geometry for analysis and future pedestrian-edge scoring:
+
+```bash
+curl --get 'http://127.0.0.1:8000/shade/building-shadows' \
+  --data-urlencode 'at=2026-06-21T13:07:00-05:00'
+```
+
+Request the corresponding WGS 84 GeoJSON prepared for the mobile map:
+
+```bash
+curl --get 'http://127.0.0.1:8000/shade/building-shadows/map' \
+  --data-urlencode 'at=2026-06-21T13:07:00-05:00'
+```
+
+The Expo app consumes the map endpoint and renders live building shadows with the tree-shadow overlay. Both layers change direction and length with the current solar bucket and disappear at night. The next milestone is to combine tree and building coverage to score pedestrian edges; route selection is not shade-weighted yet.
+
 ## Pedestrian routing data
 
 The bundled graph in `backend/app/data/pedestrian_graph.json` is derived from [OpenStreetMap](https://www.openstreetmap.org/) data and is available under the [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) license. Texas A&M's [official sidewalk layer](https://gis.tamu.edu/arcgis/rest/services/FCOR/TAMU_BaseMap/MapServer/18) can be used for visual validation.

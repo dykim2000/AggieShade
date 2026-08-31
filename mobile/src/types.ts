@@ -23,17 +23,20 @@ export type Route = {
 
 export type GeoJsonPosition = [number, number];
 
-export type TreeShadowGeoJson = {
+export type ShadowGeoJson = {
   type: "FeatureCollection";
   features: Array<{
     type: "Feature";
-    properties: Record<string, string>;
+    properties: Record<string, string | number | boolean | null>;
     geometry: {
       type: "MultiPolygon";
       coordinates: GeoJsonPosition[][][];
     };
   }>;
 };
+
+export type TreeShadowGeoJson = ShadowGeoJson;
+export type BuildingShadowGeoJson = ShadowGeoJson;
 
 export type TreeShadowMap = {
   bucket_start: string;
@@ -42,4 +45,16 @@ export type TreeShadowMap = {
   shadow_azimuth_degrees: number | null;
   shadow_count: number;
   geojson: TreeShadowGeoJson;
+};
+
+export type BuildingShadowMap = {
+  bucket_start: string;
+  bucket_minutes: number;
+  daylight: boolean;
+  shadow_azimuth_degrees: number | null;
+  eligible_building_count: number;
+  excluded_building_count: number;
+  shadow_count: number;
+  polygon_count: number;
+  geojson: BuildingShadowGeoJson;
 };

@@ -18,8 +18,15 @@ import {
 } from "react-native";
 import MapView, { Geojson, Marker, Polyline } from "react-native-maps";
 
-import { getBuildings, getRoute, getTreeShadowMap } from "./src/api";
-import type { Building, Route, TreeShadowGeoJson, TreeShadowMap } from "./src/types";
+import { getBuildings, getBuildingShadowMap, getRoute, getTreeShadowMap } from "./src/api";
+import type {
+  Building,
+  BuildingShadowGeoJson,
+  BuildingShadowMap,
+  Route,
+  TreeShadowGeoJson,
+  TreeShadowMap,
+} from "./src/types";
 
 const MAROON = "#500000";
 const GREEN = "#287052";
@@ -33,17 +40,36 @@ const TAMU_REGION = {
 
 type SearchField = "origin" | "destination";
 
-type ShadowOverlayProps = {
+type TreeShadowOverlayProps = {
   geojson: TreeShadowGeoJson;
 };
 
-const ShadowOverlay = memo(function ShadowOverlay({ geojson }: ShadowOverlayProps) {
+const TreeShadowOverlay = memo(function TreeShadowOverlay({ geojson }: TreeShadowOverlayProps) {
   return (
     <Geojson
-      fillColor="rgba(35, 54, 47, 0.20)"
+      fillColor="rgba(35, 86, 64, 0.22)"
       geojson={geojson}
-      strokeColor="rgba(35, 54, 47, 0.32)"
+      strokeColor="rgba(35, 86, 64, 0.38)"
       strokeWidth={0.5}
+      tappable={false}
+      zIndex={2}
+    />
+  );
+});
+
+type BuildingShadowOverlayProps = {
+  geojson: BuildingShadowGeoJson;
+};
+
+const BuildingShadowOverlay = memo(function BuildingShadowOverlay({
+  geojson,
+}: BuildingShadowOverlayProps) {
+  return (
+    <Geojson
+      fillColor="rgba(76, 72, 91, 0.25)"
+      geojson={geojson}
+      strokeColor="rgba(76, 72, 91, 0.42)"
+      strokeWidth={0.65}
       tappable={false}
       zIndex={1}
     />
@@ -67,15 +93,28 @@ function formatBucketTime(bucketStart: string): string {
 
 function formatShadeStatus(
   loading: boolean,
-  failed: boolean,
-  shadowMap: TreeShadowMap | null,
+  treeFailed: boolean,
+  buildingFailed: boolean,
+  treeShadowMap: TreeShadowMap | null,
+  buildingShadowMap: BuildingShadowMap | null,
 ): string {
-  if (loading) return "Loading current tree shade…";
-  if (failed || !shadowMap) return "Tree shade unavailable";
-  const bucketTime = formatBucketTime(shadowMap.bucket_start);
-  return shadowMap.daylight
-    ? `${shadowMap.shadow_count.toLocaleString()} tree shadows · ${bucketTime}`
-    : `Nighttime · no tree shadows · ${bucketTime}`;
+  if (loading) return "Loading current shade…";
+
+  const treeUnavailable = treeFailed || !treeShadowMap;
+  const buildingUnavailable = buildingFailed || !buildingShadowMap;
+  if (treeUnavailable && buildingUnavailable) return "Tree and building shade unavailable";
+
+  const bucketStart = treeShadowMap?.bucket_start ?? buildingShadowMap?.bucket_start;
+  if (!bucketStart) return "Tree and building shade unavailable";
+  const treeStatus = treeUnavailable
+    ? "trees unavailable"
+    : `trees ${treeShadowMap.shadow_count.toLocaleString()}`;
+  const buildingStatus = buildingUnavailable
+    ? "buildings unavailable"
+    : `buildings ${buildingShadowMap.shadow_count.toLocaleString()}`;
+  const daylight = treeShadowMap?.daylight ?? buildingShadowMap?.daylight ?? false;
+  const period = daylight ? "" : "Night · ";
+  return `${period}${treeStatus} · ${buildingStatus} · ${formatBucketTime(bucketStart)}`;
 }
 
 function buildingMatchScore(building: Building, query: string): number | null {
@@ -231,8 +270,10 @@ export default function App() {
   const [routing, setRouting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [treeShadowMap, setTreeShadowMap] = useState<TreeShadowMap | null>(null);
+  const [buildingShadowMap, setBuildingShadowMap] = useState<BuildingShadowMap | null>(null);
   const [shadeLoading, setShadeLoading] = useState(true);
-  const [shadeError, setShadeError] = useState(false);
+  const [treeShadeError, setTreeShadeError] = useState(false);
+  const [buildingShadeError, setBuildingShadeError] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchReady, setSearchReady] = useState(false);
 
@@ -278,20 +319,29 @@ export default function App() {
     let refreshTimer: ReturnType<typeof setInterval> | undefined;
 
     async function refreshShadows() {
-      try {
-        const result = await getTreeShadowMap(new Date());
-        if (active) {
-          setTreeShadowMap(result);
-          setShadeError(false);
-        }
-      } catch {
-        if (active) {
-          setTreeShadowMap(null);
-          setShadeError(true);
-        }
-      } finally {
-        if (active) setShadeLoading(false);
+      const requestedAt = new Date();
+      const [treeResult, buildingResult] = await Promise.allSettled([
+        getTreeShadowMap(requestedAt),
+        getBuildingShadowMap(requestedAt),
+      ]);
+      if (!active) return;
+
+      if (treeResult.status === "fulfilled") {
+        setTreeShadowMap(treeResult.value);
+        setTreeShadeError(false);
+      } else {
+        setTreeShadowMap(null);
+        setTreeShadeError(true);
       }
+
+      if (buildingResult.status === "fulfilled") {
+        setBuildingShadowMap(buildingResult.value);
+        setBuildingShadeError(false);
+      } else {
+        setBuildingShadowMap(null);
+        setBuildingShadeError(true);
+      }
+      setShadeLoading(false);
     }
 
     const interactionTask = InteractionManager.runAfterInteractions(() => {
@@ -344,7 +394,16 @@ export default function App() {
     [activeQuery, buildings],
   );
   const searchResults = matchingBuildings.slice(0, 8);
-  const shadeStatus = formatShadeStatus(shadeLoading, shadeError, treeShadowMap);
+  const shadeStatus = formatShadeStatus(
+    shadeLoading,
+    treeShadeError,
+    buildingShadeError,
+    treeShadowMap,
+    buildingShadowMap,
+  );
+  const shadeDaylight = treeShadowMap?.daylight ?? buildingShadowMap?.daylight ?? false;
+  const shadeUnavailable =
+    (treeShadeError || !treeShadowMap) && (buildingShadeError || !buildingShadowMap);
 
   async function requestRoute() {
     if (!originId || !destinationId || originId === destinationId) return;
@@ -434,7 +493,12 @@ export default function App() {
         </View>
         <View style={styles.mapShell}>
           <MapView ref={mapRef} style={styles.map} initialRegion={TAMU_REGION}>
-            {treeShadowMap?.shadow_count ? <ShadowOverlay geojson={treeShadowMap.geojson} /> : null}
+            {buildingShadowMap?.shadow_count ? (
+              <BuildingShadowOverlay geojson={buildingShadowMap.geojson} />
+            ) : null}
+            {treeShadowMap?.shadow_count ? (
+              <TreeShadowOverlay geojson={treeShadowMap.geojson} />
+            ) : null}
             <Polyline
               coordinates={route?.geometry ?? []}
               strokeColor="rgba(255,255,255,0.96)"
@@ -485,11 +549,11 @@ export default function App() {
               <View
                 style={[
                   styles.shadeDot,
-                  (shadeError || !treeShadowMap?.daylight) && styles.shadeDotInactive,
+                  (shadeUnavailable || !shadeDaylight) && styles.shadeDotInactive,
                 ]}
               />
             )}
-            <Text numberOfLines={1} style={styles.shadeText}>
+            <Text numberOfLines={2} style={styles.shadeText}>
               {shadeStatus}
             </Text>
           </View>
@@ -702,6 +766,7 @@ const styles = StyleSheet.create({
     minHeight: 30,
     borderRadius: 10,
     paddingHorizontal: 10,
+    paddingVertical: 6,
     backgroundColor: "rgba(255,255,255,0.94)",
     flexDirection: "row",
     alignItems: "center",
@@ -709,7 +774,7 @@ const styles = StyleSheet.create({
   },
   shadeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: GREEN },
   shadeDotInactive: { backgroundColor: "#9A9087" },
-  shadeText: { flex: 1, color: "#4B433D", fontSize: 10, fontWeight: "700" },
+  shadeText: { flex: 1, color: "#4B433D", fontSize: 10, fontWeight: "700", lineHeight: 13 },
   selectionArea: { flex: 1, marginTop: 6 },
   selectionAreaFocused: {
     position: "absolute",

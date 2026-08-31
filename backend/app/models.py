@@ -4,6 +4,12 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .campus import BUILDING_NODES, NODES, Building, Route
+from .shade.buildings import (
+    MAX_BUILDING_SHADOW_LENGTH_M,
+    BuildingShadow,
+    BuildingShadowBucket,
+    BuildingShadowMapBucket,
+)
 from .shade.solar import SOLAR_REFERENCE_URL, TIME_BUCKET_MINUTES, SolarPosition
 from .shade.trees import (
     MAX_TREE_SHADOW_LENGTH_M,
@@ -152,6 +158,86 @@ class TreeShadowCollectionResponse(BaseModel):
         )
 
 
+class BuildingShadowResponse(BaseModel):
+    building_id: int | str
+    name: str | None
+    building_number: str | None
+    abbreviation: str | None
+    estimated_height_m: float
+    height_source: str
+    quality_flags: list[str]
+    shadow_length_m: float
+    length_capped: bool
+    polygons_m: list[list[list[MetricPointResponse]]]
+
+    @classmethod
+    def from_building_shadow(cls, shadow: BuildingShadow) -> "BuildingShadowResponse":
+        return cls(
+            building_id=shadow.building_id,
+            name=shadow.name,
+            building_number=shadow.building_number,
+            abbreviation=shadow.abbreviation,
+            estimated_height_m=shadow.height_m,
+            height_source=shadow.height_source,
+            quality_flags=list(shadow.quality_flags),
+            shadow_length_m=shadow.shadow_length_m,
+            length_capped=shadow.length_capped,
+            polygons_m=[
+                [
+                    [
+                        MetricPointResponse(easting=point[0], northing=point[1])
+                        for point in ring
+                    ]
+                    for ring in polygon
+                ]
+                for polygon in shadow.polygons_m
+            ],
+        )
+
+
+class BuildingShadowCollectionResponse(BaseModel):
+    bucket_start: datetime
+    bucket_minutes: int
+    crs: str
+    daylight: bool
+    solar_altitude_degrees: float
+    shadow_azimuth_degrees: float | None
+    eligible_building_count: int
+    excluded_building_count: int
+    shadow_count: int
+    polygon_count: int
+    shadow_length_cap_m: float
+    maximum_generated_shadow_length_m: float
+    shadows: list[BuildingShadowResponse]
+
+    @classmethod
+    def from_building_shadow_bucket(
+        cls,
+        bucket: BuildingShadowBucket,
+    ) -> "BuildingShadowCollectionResponse":
+        return cls(
+            bucket_start=bucket.bucket_start,
+            bucket_minutes=TIME_BUCKET_MINUTES,
+            crs=bucket.crs,
+            daylight=bucket.solar.daylight,
+            solar_altitude_degrees=bucket.solar.apparent_altitude_degrees,
+            shadow_azimuth_degrees=bucket.solar.shadow_azimuth_degrees,
+            eligible_building_count=bucket.eligible_building_count,
+            excluded_building_count=bucket.excluded_building_count,
+            shadow_count=len(bucket.shadows),
+            polygon_count=sum(len(shadow.polygons_m) for shadow in bucket.shadows),
+            shadow_length_cap_m=MAX_BUILDING_SHADOW_LENGTH_M,
+            maximum_generated_shadow_length_m=max(
+                (shadow.shadow_length_m for shadow in bucket.shadows),
+                default=0,
+            ),
+            shadows=[
+                BuildingShadowResponse.from_building_shadow(shadow)
+                for shadow in bucket.shadows
+            ],
+        )
+
+
 class GeoJsonMultiPolygonGeometry(BaseModel):
     type: Literal["MultiPolygon"] = "MultiPolygon"
     coordinates: list[list[list[tuple[float, float]]]]
@@ -193,6 +279,53 @@ class TreeShadowMapResponse(BaseModel):
             geojson=GeoJsonFeatureCollection(
                 features=[GeoJsonFeature(geometry=geometry)],
             ),
+        )
+
+
+class BuildingShadowMapResponse(BaseModel):
+    bucket_start: datetime
+    bucket_minutes: int
+    daylight: bool
+    shadow_azimuth_degrees: float | None
+    eligible_building_count: int
+    excluded_building_count: int
+    shadow_count: int
+    polygon_count: int
+    geojson: GeoJsonFeatureCollection
+
+    @classmethod
+    def from_building_shadow_map_bucket(
+        cls,
+        bucket: BuildingShadowMapBucket,
+    ) -> "BuildingShadowMapResponse":
+        features = [
+            GeoJsonFeature(
+                properties={
+                    "building_id": str(feature.building_id),
+                    "name": feature.name or "",
+                    "estimated_height_m": str(feature.height_m),
+                    "height_source": feature.height_source,
+                    "quality_flags": ",".join(feature.quality_flags),
+                },
+                geometry=GeoJsonMultiPolygonGeometry(
+                    coordinates=[
+                        [list(ring) for ring in polygon]
+                        for polygon in feature.polygons_wgs84
+                    ]
+                ),
+            )
+            for feature in bucket.features
+        ]
+        return cls(
+            bucket_start=bucket.bucket_start,
+            bucket_minutes=TIME_BUCKET_MINUTES,
+            daylight=bucket.daylight,
+            shadow_azimuth_degrees=bucket.shadow_azimuth_degrees,
+            eligible_building_count=bucket.eligible_building_count,
+            excluded_building_count=bucket.excluded_building_count,
+            shadow_count=len(bucket.features),
+            polygon_count=sum(len(feature.polygons_wgs84) for feature in bucket.features),
+            geojson=GeoJsonFeatureCollection(features=features),
         )
 
 

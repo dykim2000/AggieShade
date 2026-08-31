@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .campus import BUILDINGS, route_between
 from .models import (
+    BuildingShadowCollectionResponse,
+    BuildingShadowMapResponse,
     BuildingResponse,
     RouteRequest,
     RouteResponse,
@@ -13,13 +15,14 @@ from .models import (
     TreeShadowMapResponse,
     building_response,
 )
+from .shade.buildings import building_shadow_map_at, building_shadows_at
 from .shade.solar import solar_position
 from .shade.trees import tree_shadow_map_at, tree_shadows_at
 
 
 app = FastAPI(
     title="AggieShade API",
-    version="0.3.0",
+    version="0.4.0",
     description="Campus routing and shade-modeling services for AggieShade.",
 )
 
@@ -73,6 +76,28 @@ def get_tree_shadow_map(at: datetime) -> TreeShadowMapResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return TreeShadowMapResponse.from_tree_shadow_map_bucket(bucket)
+
+
+@app.get("/shade/building-shadows", response_model=BuildingShadowCollectionResponse)
+def get_building_shadows(at: datetime) -> BuildingShadowCollectionResponse:
+    """Return metric building-shadow polygons for the instant's 15-minute bucket."""
+
+    try:
+        bucket = building_shadows_at(at)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return BuildingShadowCollectionResponse.from_building_shadow_bucket(bucket)
+
+
+@app.get("/shade/building-shadows/map", response_model=BuildingShadowMapResponse)
+def get_building_shadow_map(at: datetime) -> BuildingShadowMapResponse:
+    """Return map-optimized WGS 84 building shadows for Expo."""
+
+    try:
+        bucket = building_shadow_map_at(at)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return BuildingShadowMapResponse.from_building_shadow_map_bucket(bucket)
 
 
 @app.post("/routes", response_model=RouteResponse)
