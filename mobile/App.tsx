@@ -6,6 +6,7 @@ import {
   InteractionManager,
   Keyboard,
   KeyboardAvoidingView,
+  PanResponder,
   Platform,
   Pressable,
   SafeAreaView,
@@ -14,6 +15,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import MapView, { Geojson, Marker, Polyline } from "react-native-maps";
@@ -30,6 +32,8 @@ import type {
 
 const MAROON = "#500000";
 const GREEN = "#287052";
+const SHEET_TOP = 68;
+const SHEET_PEEK_HEIGHT = 310;
 const COMMON_PLACE_IDS = ["msc", "evans", "zachry", "kyle", "academic", "sbisa"];
 const TAMU_REGION = {
   latitude: 30.6168,
@@ -230,6 +234,7 @@ function SearchResults({
       {results.length ? (
         results.map((building) => (
           <Pressable
+            accessibilityHint={`Sets the ${field === "origin" ? "starting point" : "destination"}`}
             accessibilityRole="button"
             key={building.id}
             onPress={() => onSelect(building)}
@@ -244,7 +249,6 @@ function SearchResults({
                 {buildingDetails(building)}
               </Text>
             </View>
-            <Text style={styles.resultAction}>Choose</Text>
           </Pressable>
         ))
       ) : (
@@ -255,10 +259,17 @@ function SearchResults({
 }
 
 export default function App() {
+  const { height: windowHeight } = useWindowDimensions();
+  const estimatedSheetHeight = Math.max(SHEET_PEEK_HEIGHT, windowHeight - SHEET_TOP);
+  const estimatedCollapsedOffset = Math.max(0, estimatedSheetHeight - SHEET_PEEK_HEIGHT);
   const mapRef = useRef<MapView>(null);
   const originInputRef = useRef<TextInput>(null);
   const destinationInputRef = useRef<TextInput>(null);
-  const searchTransition = useRef(new Animated.Value(0)).current;
+  const sheetTranslateY = useRef(new Animated.Value(estimatedCollapsedOffset)).current;
+  const sheetPositionRef = useRef(estimatedCollapsedOffset);
+  const sheetDragStartRef = useRef(estimatedCollapsedOffset);
+  const pendingFocusRef = useRef<SearchField | null>(null);
+  const [sheetHeight, setSheetHeight] = useState(0);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [originId, setOriginId] = useState<string | null>(null);
   const [destinationId, setDestinationId] = useState<string | null>(null);
@@ -275,7 +286,10 @@ export default function App() {
   const [treeShadeError, setTreeShadeError] = useState(false);
   const [buildingShadeError, setBuildingShadeError] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchReady, setSearchReady] = useState(false);
+  const collapsedOffset = Math.max(
+    0,
+    (sheetHeight || estimatedSheetHeight) - SHEET_PEEK_HEIGHT,
+  );
 
   const loadCampusBuildings = useCallback(async () => {
     setLoading(true);
@@ -299,26 +313,36 @@ export default function App() {
   }, [loadCampusBuildings]);
 
   useEffect(() => {
-    if (!searchOpen || !searchReady) return;
-    const inputRef = activeField === "origin" ? originInputRef : destinationInputRef;
-    const focusFrame = requestAnimationFrame(() => inputRef.current?.focus());
-    return () => cancelAnimationFrame(focusFrame);
-  }, [activeField, searchOpen, searchReady]);
+    const listenerId = sheetTranslateY.addListener(({ value }) => {
+      sheetPositionRef.current = value;
+    });
+    return () => sheetTranslateY.removeListener(listenerId);
+  }, [sheetTranslateY]);
+
+  useEffect(() => {
+    if (!searchOpen) {
+      sheetTranslateY.setValue(collapsedOffset);
+    }
+  }, [collapsedOffset, searchOpen, sheetTranslateY]);
 
   useEffect(() => {
     if (!searchOpen) return;
-    searchTransition.setValue(0);
-    const openAnimation = Animated.timing(searchTransition, {
-      toValue: 1,
-      duration: 230,
-      easing: Easing.out(Easing.cubic),
+    const openAnimation = Animated.spring(sheetTranslateY, {
+      toValue: 0,
+      speed: 18,
+      bounciness: 4,
       useNativeDriver: true,
     });
     openAnimation.start(({ finished }) => {
-      if (finished) setSearchReady(true);
+      if (!finished) return;
+      const field = pendingFocusRef.current;
+      pendingFocusRef.current = null;
+      if (!field) return;
+      const inputRef = field === "origin" ? originInputRef : destinationInputRef;
+      requestAnimationFrame(() => inputRef.current?.focus());
     });
     return () => openAnimation.stop();
-  }, [searchOpen, searchTransition]);
+  }, [searchOpen, sheetTranslateY]);
 
   useEffect(() => {
     let active = true;
@@ -364,7 +388,7 @@ export default function App() {
   useEffect(() => {
     if (route?.geometry.length) {
       mapRef.current?.fitToCoordinates(route.geometry, {
-        edgePadding: { top: 90, right: 55, bottom: 80, left: 55 },
+        edgePadding: { top: 150, right: 48, bottom: SHEET_PEEK_HEIGHT + 24, left: 48 },
         animated: true,
       });
     }
@@ -438,24 +462,41 @@ export default function App() {
     }
   }
 
-  function openSearch(field: SearchField) {
-    setActiveField(field);
-    if (!searchOpen) {
-      setSearchReady(false);
-      setSearchOpen(true);
-    }
-  }
-
-  function closeSearch() {
+  function dismissKeyboard() {
     originInputRef.current?.blur();
     destinationInputRef.current?.blur();
     Keyboard.dismiss();
-    if (!searchOpen) return;
-    setSearchReady(false);
-    Animated.timing(searchTransition, {
+  }
+
+  function expandSheet(field?: SearchField) {
+    if (field) setActiveField(field);
+    sheetTranslateY.stopAnimation();
+    if (!searchOpen) {
+      pendingFocusRef.current = field ?? null;
+      setSearchOpen(true);
+      return;
+    }
+    if (field) pendingFocusRef.current = null;
+    Animated.spring(sheetTranslateY, {
       toValue: 0,
-      duration: 170,
-      easing: Easing.in(Easing.cubic),
+      speed: 18,
+      bounciness: 4,
+      useNativeDriver: true,
+    }).start();
+  }
+
+  function openSearch(field: SearchField) {
+    expandSheet(field);
+  }
+
+  function closeSearch() {
+    dismissKeyboard();
+    pendingFocusRef.current = null;
+    sheetTranslateY.stopAnimation();
+    Animated.timing(sheetTranslateY, {
+      toValue: collapsedOffset,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start(({ finished }) => {
       if (finished) setSearchOpen(false);
@@ -482,73 +523,120 @@ export default function App() {
     }
   }
 
+  const sheetPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          Math.abs(gesture.dy) > 5 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onPanResponderGrant: () => {
+          sheetTranslateY.stopAnimation((value) => {
+            sheetDragStartRef.current = value;
+          });
+        },
+        onPanResponderMove: (_, gesture) => {
+          const nextPosition = Math.max(
+            0,
+            Math.min(collapsedOffset, sheetDragStartRef.current + gesture.dy),
+          );
+          sheetTranslateY.setValue(nextPosition);
+        },
+        onPanResponderRelease: (_, gesture) => {
+          const movingUp = gesture.vy < -0.35;
+          const movingDown = gesture.vy > 0.35;
+          const aboveMidpoint = sheetPositionRef.current < collapsedOffset * 0.5;
+          if (movingUp || (!movingDown && aboveMidpoint)) {
+            expandSheet();
+          } else {
+            closeSearch();
+          }
+        },
+        onPanResponderTerminate: () => {
+          if (searchOpen) expandSheet();
+          else closeSearch();
+        },
+      }),
+    [collapsedOffset, searchOpen, sheetTranslateY],
+  );
+
   const activeSelectionId = activeField === "origin" ? originId : destinationId;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" />
-      <View style={styles.content}>
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.eyebrow}>TEXAS A&M CAMPUS</Text>
-            <Text style={styles.title}>AggieShade</Text>
+    <View style={styles.appRoot}>
+      <StatusBar backgroundColor="transparent" barStyle="dark-content" translucent />
+      <MapView
+        initialRegion={TAMU_REGION}
+        onPress={dismissKeyboard}
+        ref={mapRef}
+        style={styles.map}
+      >
+        {buildingShadowMap?.shadow_count ? (
+          <BuildingShadowOverlay geojson={buildingShadowMap.geojson} />
+        ) : null}
+        {treeShadowMap?.shadow_count ? (
+          <TreeShadowOverlay geojson={treeShadowMap.geojson} />
+        ) : null}
+        <Polyline
+          coordinates={route?.geometry ?? []}
+          strokeColor="rgba(255,255,255,0.96)"
+          strokeWidth={9}
+          lineCap="round"
+          lineJoin="round"
+          zIndex={20}
+        />
+        <Polyline
+          coordinates={route?.geometry ?? []}
+          strokeColor={MAROON}
+          strokeWidth={5}
+          lineCap="round"
+          lineJoin="round"
+          zIndex={21}
+        />
+        <Marker
+          key="origin-marker"
+          coordinate={originBuilding?.route_point ?? TAMU_REGION}
+          title={originBuilding?.short_name}
+          description={originBuilding?.name}
+          opacity={originBuilding ? 1 : 0}
+          pinColor={GREEN}
+          zIndex={30}
+        />
+        <Marker
+          key="destination-marker"
+          coordinate={destinationBuilding?.route_point ?? TAMU_REGION}
+          title={destinationBuilding?.short_name}
+          description={destinationBuilding?.name}
+          opacity={destinationBuilding ? 1 : 0}
+          pinColor={MAROON}
+          zIndex={31}
+        />
+      </MapView>
+
+      <SafeAreaView pointerEvents="box-none" style={styles.safeAreaOverlay}>
+        <View pointerEvents="box-none" style={styles.content}>
+          <View pointerEvents="none" style={styles.header}>
+            <View>
+              <Text style={styles.eyebrow}>TEXAS A&M CAMPUS</Text>
+              <Text style={styles.title}>AggieShade</Text>
+            </View>
+            <View style={styles.milestoneBadge}>
+              <Text style={styles.milestoneText}>WALKING ROUTES</Text>
+            </View>
           </View>
-          <View style={styles.milestoneBadge}>
-            <Text style={styles.milestoneText}>WALKING ROUTES</Text>
-          </View>
-        </View>
-        <View style={styles.mapShell}>
-          <MapView ref={mapRef} style={styles.map} initialRegion={TAMU_REGION}>
-            {buildingShadowMap?.shadow_count ? (
-              <BuildingShadowOverlay geojson={buildingShadowMap.geojson} />
-            ) : null}
-            {treeShadowMap?.shadow_count ? (
-              <TreeShadowOverlay geojson={treeShadowMap.geojson} />
-            ) : null}
-            <Polyline
-              coordinates={route?.geometry ?? []}
-              strokeColor="rgba(255,255,255,0.96)"
-              strokeWidth={9}
-              lineCap="round"
-              lineJoin="round"
-              zIndex={20}
-            />
-            <Polyline
-              coordinates={route?.geometry ?? []}
-              strokeColor={MAROON}
-              strokeWidth={5}
-              lineCap="round"
-              lineJoin="round"
-              zIndex={21}
-            />
-            <Marker
-              key="origin-marker"
-              coordinate={originBuilding?.route_point ?? TAMU_REGION}
-              title={originBuilding?.short_name}
-              description={originBuilding?.name}
-              opacity={originBuilding ? 1 : 0}
-              pinColor={GREEN}
-              zIndex={30}
-            />
-            <Marker
-              key="destination-marker"
-              coordinate={destinationBuilding?.route_point ?? TAMU_REGION}
-              title={destinationBuilding?.short_name}
-              description={destinationBuilding?.name}
-              opacity={destinationBuilding ? 1 : 0}
-              pinColor={MAROON}
-              zIndex={31}
-            />
-          </MapView>
+
           {route && (
-            <View style={styles.routeCard}>
+            <View pointerEvents="none" style={styles.routeCard}>
               <Text style={styles.routeCardLabel}>PEDESTRIAN ROUTE</Text>
               <Text style={styles.routeCardValue}>
                 {formatDuration(route.duration_seconds)} · {formatDistance(route.distance_m)}
               </Text>
             </View>
           )}
-          <View pointerEvents="none" style={styles.shadeCard}>
+
+          <View
+            pointerEvents="none"
+            style={[styles.shadeCard, { bottom: SHEET_PEEK_HEIGHT + 12 }]}
+          >
             {shadeLoading ? (
               <ActivityIndicator color={GREEN} size="small" />
             ) : (
@@ -563,191 +651,209 @@ export default function App() {
               {shadeStatus}
             </Text>
           </View>
-        </View>
 
-        <Animated.View
-          style={[
-            styles.selectionArea,
-            searchOpen && styles.selectionAreaFocused,
-            searchOpen && {
-              opacity: searchTransition,
-              transform: [
-                {
-                  translateY: searchTransition.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [24, 0],
-                  }),
-                },
-                {
-                  scale: searchTransition.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.985, 1],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-            enabled={Platform.OS === "ios"}
-            keyboardVerticalOffset={0}
-            style={styles.keyboardPanel}
+          <Animated.View
+            onLayout={(event) => setSheetHeight(event.nativeEvent.layout.height)}
+            style={[
+              styles.selectionArea,
+              { transform: [{ translateY: sheetTranslateY }] },
+            ]}
           >
-            {loading ? (
-              <View style={styles.loadingRow}>
-                <ActivityIndicator color={MAROON} />
-                <Text style={styles.muted}>Loading campus buildings…</Text>
-              </View>
-            ) : (
-              <>
-                <ScrollView
-                  contentContainerStyle={styles.panel}
-                  keyboardDismissMode="none"
-                  keyboardShouldPersistTaps="always"
-                  showsVerticalScrollIndicator={false}
-                  style={styles.panelScroll}
-                >
-                  {searchOpen && (
-                    <View style={styles.commonSection}>
-                      <View style={styles.commonHeading}>
-                        <Text style={styles.commonTitle}>Common Places</Text>
-                        <Text style={styles.commonTarget}>
-                          Choosing for {activeField === "origin" ? "Start" : "Destination"}
-                        </Text>
-                      </View>
-                      <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.chipRow}
-                        keyboardShouldPersistTaps="always"
-                      >
-                        {commonPlaces.map((building) => {
-                          const selected = building.id === activeSelectionId;
-                          return (
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityState={{ selected }}
-                              key={building.id}
-                              onPress={() => selectBuilding(building)}
-                              style={[styles.chip, selected && styles.chipSelected]}
-                            >
-                              <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                                {building.short_name}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </ScrollView>
-                    </View>
-                  )}
+            <View style={styles.sheetDragArea} {...sheetPanResponder.panHandlers}>
+              <Pressable
+                accessibilityHint={searchOpen ? "Returns to the map" : "Shows places and search results"}
+                accessibilityLabel={searchOpen ? "Collapse route planner" : "Expand route planner"}
+                accessibilityRole="button"
+                onPress={() => (searchOpen ? closeSearch() : expandSheet())}
+                style={({ pressed }) => [styles.sheetHeaderButton, pressed && styles.sheetHeaderPressed]}
+              >
+                <View style={styles.sheetHandle} />
+                <View style={styles.sheetHeadingRow}>
+                  <View>
+                    <Text style={styles.sheetEyebrow}>ROUTE PLANNER</Text>
+                    <Text style={styles.sheetTitle}>Plan your walk</Text>
+                  </View>
+                  <Text style={styles.sheetHint}>{searchOpen ? "Swipe down" : "Swipe up"}</Text>
+                </View>
+              </Pressable>
+            </View>
 
-                  <SearchInput
-                    active={activeField === "origin"}
-                    expanded={searchOpen}
-                    field="origin"
-                    inputRef={originInputRef}
-                    label="Starting point"
-                    onChange={(value) => updateQuery("origin", value)}
-                    onFocus={openSearch}
-                    onOpen={openSearch}
-                    value={originQuery}
-                  />
-                  {searchOpen && activeField === "origin" && (
-                    <SearchResults
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : undefined}
+              enabled={Platform.OS === "ios"}
+              keyboardVerticalOffset={0}
+              pointerEvents="box-none"
+              style={styles.keyboardPanel}
+            >
+              {loading ? (
+                <View style={styles.loadingRow}>
+                  <ActivityIndicator color={MAROON} />
+                  <Text style={styles.muted}>Loading campus buildings…</Text>
+                </View>
+              ) : (
+                <>
+                  <View style={styles.routeForm}>
+                    <SearchInput
+                      active={activeField === "origin"}
+                      expanded={searchOpen}
                       field="origin"
-                      matchingBuildings={matchingBuildings}
-                      onSelect={(building) => selectBuilding(building, "origin")}
-                      query={originQuery}
-                      results={searchResults}
+                      inputRef={originInputRef}
+                      label="Starting point"
+                      onChange={(value) => updateQuery("origin", value)}
+                      onFocus={openSearch}
+                      onOpen={openSearch}
+                      value={originQuery}
                     />
-                  )}
-                  <SearchInput
-                    active={activeField === "destination"}
-                    expanded={searchOpen}
-                    field="destination"
-                    inputRef={destinationInputRef}
-                    label="Destination"
-                    onChange={(value) => updateQuery("destination", value)}
-                    onFocus={openSearch}
-                    onOpen={openSearch}
-                    value={destinationQuery}
-                  />
-                  {searchOpen && activeField === "destination" && (
-                    <SearchResults
+                    <SearchInput
+                      active={activeField === "destination"}
+                      expanded={searchOpen}
                       field="destination"
-                      matchingBuildings={matchingBuildings}
-                      onSelect={(building) => selectBuilding(building, "destination")}
-                      query={destinationQuery}
-                      results={searchResults}
+                      inputRef={destinationInputRef}
+                      label="Destination"
+                      onChange={(value) => updateQuery("destination", value)}
+                      onFocus={openSearch}
+                      onOpen={openSearch}
+                      value={destinationQuery}
                     />
-                  )}
-                </ScrollView>
 
-                <View style={styles.actionArea}>
-                  {error && <Text style={styles.error}>{error}</Text>}
-                  <View style={styles.actionButtons}>
-                    {!buildings.length && error ? (
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={() => void loadCampusBuildings()}
-                        style={({ pressed }) => [styles.routeButton, pressed && styles.pressed]}
-                      >
-                        <Text style={styles.routeButtonText}>Retry Connection</Text>
-                      </Pressable>
-                    ) : (
-                      <>
-                        {searchOpen && (
+                    <View style={styles.actionArea}>
+                      {error && <Text numberOfLines={2} style={styles.error}>{error}</Text>}
+                      <View style={styles.actionButtons}>
+                        {!buildings.length && error ? (
                           <Pressable
                             accessibilityRole="button"
-                            onPress={closeSearch}
-                            style={({ pressed }) => [styles.doneButton, pressed && styles.pressed]}
+                            onPress={() => void loadCampusBuildings()}
+                            style={({ pressed }) => [styles.routeButton, pressed && styles.pressed]}
                           >
-                            <Text style={styles.doneButtonText}>Done</Text>
+                            <Text style={styles.routeButtonText}>Retry Connection</Text>
                           </Pressable>
+                        ) : (
+                          <>
+                            {searchOpen && (
+                              <Pressable
+                                accessibilityRole="button"
+                                onPress={closeSearch}
+                                style={({ pressed }) => [styles.doneButton, pressed && styles.pressed]}
+                              >
+                                <Text style={styles.doneButtonText}>Done</Text>
+                              </Pressable>
+                            )}
+                            <Pressable
+                              accessibilityRole="button"
+                              disabled={!canRoute}
+                              onPress={requestRoute}
+                              style={({ pressed }) => [
+                                styles.routeButton,
+                                !canRoute && styles.routeButtonDisabled,
+                                pressed && styles.pressed,
+                              ]}
+                            >
+                              {routing ? (
+                                <ActivityIndicator color="white" />
+                              ) : (
+                                <Text style={styles.routeButtonText}>Find Route</Text>
+                              )}
+                            </Pressable>
+                          </>
                         )}
-                        <Pressable
-                          accessibilityRole="button"
-                          disabled={!canRoute}
-                          onPress={requestRoute}
-                          style={({ pressed }) => [
-                            styles.routeButton,
-                            !canRoute && styles.routeButtonDisabled,
-                            pressed && styles.pressed,
-                          ]}
-                        >
-                          {routing ? (
-                            <ActivityIndicator color="white" />
-                          ) : (
-                            <Text style={styles.routeButtonText}>Find Route</Text>
-                          )}
-                        </Pressable>
-                      </>
-                    )}
+                      </View>
+                    </View>
                   </View>
-                </View>
-              </>
-            )}
-          </KeyboardAvoidingView>
-        </Animated.View>
-      </View>
-    </SafeAreaView>
+
+                  {searchOpen && (
+                    <ScrollView
+                      contentContainerStyle={styles.expandedContent}
+                      keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+                      keyboardShouldPersistTaps="handled"
+                      showsVerticalScrollIndicator={false}
+                      style={styles.panelScroll}
+                    >
+                      <View style={styles.commonSection}>
+                        <View style={styles.commonHeading}>
+                          <Text style={styles.commonTitle}>Common Places</Text>
+                          <Text style={styles.commonTarget}>
+                            For {activeField === "origin" ? "Start" : "Destination"}
+                          </Text>
+                        </View>
+                        <ScrollView
+                          horizontal
+                          contentContainerStyle={styles.chipRow}
+                          keyboardShouldPersistTaps="handled"
+                          showsHorizontalScrollIndicator={false}
+                        >
+                          {commonPlaces.map((building) => {
+                            const selected = building.id === activeSelectionId;
+                            return (
+                              <Pressable
+                                accessibilityRole="button"
+                                accessibilityState={{ selected }}
+                                key={building.id}
+                                onPress={() => selectBuilding(building)}
+                                style={[styles.chip, selected && styles.chipSelected]}
+                              >
+                                <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                                  {building.short_name}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+
+                      <SearchResults
+                        field={activeField}
+                        matchingBuildings={matchingBuildings}
+                        onSelect={(building) => selectBuilding(building, activeField)}
+                        query={activeQuery}
+                        results={searchResults}
+                      />
+                      <Pressable
+                        accessibilityElementsHidden
+                        importantForAccessibility="no-hide-descendants"
+                        onPress={dismissKeyboard}
+                        style={styles.dismissArea}
+                      />
+                    </ScrollView>
+                  )}
+                </>
+              )}
+            </KeyboardAvoidingView>
+          </Animated.View>
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#F8F6F1" },
+  appRoot: { flex: 1, backgroundColor: "#E8E3D8" },
+  safeAreaOverlay: { ...StyleSheet.absoluteFillObject },
   content: { flex: 1 },
+  map: { ...StyleSheet.absoluteFillObject },
   header: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 10,
+    position: "absolute",
+    top: 8,
+    right: 14,
+    left: 14,
+    zIndex: 10,
+    minHeight: 58,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(80,0,0,0.14)",
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.95)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    shadowColor: "#2F2924",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    elevation: 5,
   },
   eyebrow: { color: GREEN, fontSize: 10, fontWeight: "700", letterSpacing: 1.4 },
-  title: { color: MAROON, fontSize: 28, fontWeight: "800", letterSpacing: -0.7 },
+  title: { color: MAROON, fontSize: 24, fontWeight: "800", letterSpacing: -0.6 },
   milestoneBadge: {
     borderColor: "#D7C8B9",
     borderWidth: 1,
@@ -756,62 +862,110 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   milestoneText: { color: "#6F6258", fontSize: 9, fontWeight: "700", letterSpacing: 0.7 },
-  mapShell: {
-    height: "38%",
-    minHeight: 205,
-    marginHorizontal: 14,
-    borderRadius: 20,
-    overflow: "hidden",
-    backgroundColor: "#E8E3D8",
-  },
-  map: { flex: 1 },
   routeCard: {
     position: "absolute",
-    top: 12,
-    left: 12,
+    top: 78,
+    left: 14,
+    zIndex: 9,
     backgroundColor: "rgba(255,255,255,0.96)",
-    borderRadius: 13,
+    borderRadius: 14,
     paddingHorizontal: 13,
     paddingVertical: 9,
+    shadowColor: "#2F2924",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 7,
+    elevation: 4,
   },
   routeCardLabel: { color: GREEN, fontSize: 9, fontWeight: "800", letterSpacing: 1 },
   routeCardValue: { color: MAROON, fontSize: 17, fontWeight: "800", marginTop: 2 },
   shadeCard: {
     position: "absolute",
-    right: 10,
-    bottom: 10,
-    left: 10,
-    minHeight: 30,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: "rgba(255,255,255,0.94)",
+    right: 14,
+    left: 14,
+    zIndex: 9,
+    minHeight: 34,
+    borderRadius: 12,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    backgroundColor: "rgba(255,255,255,0.95)",
     flexDirection: "row",
     alignItems: "center",
     gap: 7,
+    shadowColor: "#2F2924",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
   },
   shadeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: GREEN },
   shadeDotInactive: { backgroundColor: "#9A9087" },
   shadeText: { flex: 1, color: "#4B433D", fontSize: 10, fontWeight: "700", lineHeight: 13 },
-  selectionArea: { flex: 1, marginTop: 6 },
-  selectionAreaFocused: {
+  selectionArea: {
     position: "absolute",
-    top: 0,
+    top: SHEET_TOP,
     right: 0,
     bottom: 0,
     left: 0,
     zIndex: 100,
-    elevation: 100,
-    marginTop: 0,
+    elevation: 20,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     backgroundColor: "#F8F6F1",
+    shadowColor: "#2F2924",
+    shadowOffset: { width: 0, height: -5 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+  },
+  sheetDragArea: { borderTopLeftRadius: 28, borderTopRightRadius: 28 },
+  sheetHeaderButton: {
+    minHeight: 68,
+    paddingTop: 9,
+    paddingHorizontal: 18,
+    paddingBottom: 8,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+  },
+  sheetHeaderPressed: { backgroundColor: "rgba(80,0,0,0.035)" },
+  sheetHandle: {
+    alignSelf: "center",
+    width: 46,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "#C9C0B8",
+  },
+  sheetHeadingRow: {
+    marginTop: 7,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sheetEyebrow: { color: GREEN, fontSize: 9, fontWeight: "800", letterSpacing: 1.1 },
+  sheetTitle: { marginTop: 1, color: "#2F2924", fontSize: 23, fontWeight: "800", letterSpacing: -0.5 },
+  sheetHint: {
+    overflow: "hidden",
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "#EEE9E2",
+    color: "#6F6258",
+    fontSize: 10,
+    fontWeight: "800",
   },
   keyboardPanel: { flex: 1 },
+  routeForm: { paddingHorizontal: 16, paddingTop: 3, paddingBottom: 8, gap: 8 },
   panelScroll: { flex: 1 },
-  panel: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, gap: 11 },
-  searchGroup: { gap: 5 },
+  expandedContent: {
+    flexGrow: 1,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 30,
+    gap: 12,
+  },
+  searchGroup: { gap: 3 },
   searchLabel: { color: "#62574D", fontSize: 11, fontWeight: "700" },
   searchShell: {
-    minHeight: 48,
+    minHeight: 46,
     borderWidth: 1,
     borderColor: "#D7C8B9",
     borderRadius: 14,
@@ -863,7 +1017,6 @@ const styles = StyleSheet.create({
   resultCopy: { flex: 1, paddingVertical: 7 },
   resultName: { color: "#332D28", fontSize: 14, fontWeight: "700" },
   resultDescription: { color: "#81766D", fontSize: 11, marginTop: 1 },
-  resultAction: { color: MAROON, fontSize: 11, fontWeight: "800", marginLeft: 8 },
   noResults: { color: "#81766D", fontSize: 13, paddingHorizontal: 12, paddingVertical: 14 },
   commonSection: { gap: 7 },
   commonHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
@@ -881,18 +1034,11 @@ const styles = StyleSheet.create({
   chipSelected: { borderColor: MAROON, backgroundColor: MAROON },
   chipText: { color: "#4B433D", fontSize: 13, fontWeight: "600" },
   chipTextSelected: { color: "white" },
-  actionArea: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#DED5CC",
-    backgroundColor: "#F8F6F1",
-    gap: 6,
-  },
+  dismissArea: { flex: 1, minHeight: 40 },
+  actionArea: { gap: 5 },
   actionButtons: { flexDirection: "row", gap: 8 },
   doneButton: {
-    minHeight: 48,
+    minHeight: 46,
     borderWidth: 1,
     borderColor: MAROON,
     borderRadius: 14,
@@ -902,12 +1048,18 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
   },
   doneButtonText: { color: MAROON, fontSize: 14, fontWeight: "800" },
-  loadingRow: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 },
+  loadingRow: {
+    height: SHEET_PEEK_HEIGHT - 68,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
   muted: { color: "#746A62" },
-  error: { color: "#A32626", fontSize: 12 },
+  error: { color: "#A32626", fontSize: 11, lineHeight: 14 },
   routeButton: {
     flex: 1,
-    minHeight: 48,
+    minHeight: 46,
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
