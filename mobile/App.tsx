@@ -24,7 +24,6 @@ import Animated, {
   useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from "react-native-reanimated";
 
@@ -43,6 +42,9 @@ const MAROON = "#500000";
 const GREEN = "#287052";
 const SHEET_TOP = 68;
 const SHEET_PEEK_HEIGHT = 380;
+const SHEET_MINIMIZED_HEIGHT = 92;
+const SHEET_BOTTOM_OVERSCAN = 128;
+const SHEET_TRANSITION_DURATION = 264;
 const COMMON_PLACE_IDS = ["msc", "evans", "zachry", "kyle", "academic", "sbisa"];
 const TAMU_REGION = {
   latitude: 30.6168,
@@ -95,39 +97,6 @@ function formatDistance(meters: number): string {
 
 function formatDuration(seconds: number): string {
   return `${Math.max(1, Math.round(seconds / 60))} min`;
-}
-
-function formatBucketTime(bucketStart: string): string {
-  return new Date(bucketStart).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function formatShadeStatus(
-  loading: boolean,
-  treeFailed: boolean,
-  buildingFailed: boolean,
-  treeShadowMap: TreeShadowMap | null,
-  buildingShadowMap: BuildingShadowMap | null,
-): string {
-  if (loading) return "Loading current shade…";
-
-  const treeUnavailable = treeFailed || !treeShadowMap;
-  const buildingUnavailable = buildingFailed || !buildingShadowMap;
-  if (treeUnavailable && buildingUnavailable) return "Tree and building shade unavailable";
-
-  const bucketStart = treeShadowMap?.bucket_start ?? buildingShadowMap?.bucket_start;
-  if (!bucketStart) return "Tree and building shade unavailable";
-  const treeStatus = treeUnavailable
-    ? "trees unavailable"
-    : `trees ${treeShadowMap.shadow_count.toLocaleString()}`;
-  const buildingStatus = buildingUnavailable
-    ? "buildings unavailable"
-    : `buildings ${buildingShadowMap.shadow_count.toLocaleString()}`;
-  const daylight = treeShadowMap?.daylight ?? buildingShadowMap?.daylight ?? false;
-  const period = daylight ? "" : "Night · ";
-  return `${period}${treeStatus} · ${buildingStatus} · ${formatBucketTime(bucketStart)}`;
 }
 
 function buildingMatchScore(building: Building, query: string): number | null {
@@ -269,8 +238,14 @@ function SearchResults({
 
 export default function App() {
   const { height: windowHeight } = useWindowDimensions();
-  const estimatedSheetHeight = Math.max(SHEET_PEEK_HEIGHT, windowHeight - SHEET_TOP);
-  const estimatedCollapsedOffset = Math.max(0, estimatedSheetHeight - SHEET_PEEK_HEIGHT);
+  const estimatedSheetHeight = Math.max(
+    SHEET_PEEK_HEIGHT + SHEET_BOTTOM_OVERSCAN,
+    windowHeight - SHEET_TOP + SHEET_BOTTOM_OVERSCAN,
+  );
+  const estimatedCollapsedOffset = Math.max(
+    0,
+    estimatedSheetHeight - SHEET_BOTTOM_OVERSCAN - SHEET_PEEK_HEIGHT,
+  );
   const mapRef = useRef<MapView>(null);
   const originInputRef = useRef<TextInput>(null);
   const destinationInputRef = useRef<TextInput>(null);
@@ -295,13 +270,15 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [treeShadowMap, setTreeShadowMap] = useState<TreeShadowMap | null>(null);
   const [buildingShadowMap, setBuildingShadowMap] = useState<BuildingShadowMap | null>(null);
-  const [shadeLoading, setShadeLoading] = useState(true);
-  const [treeShadeError, setTreeShadeError] = useState(false);
-  const [buildingShadeError, setBuildingShadeError] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [lobbyMinimized, setLobbyMinimized] = useState(false);
   const collapsedOffset = Math.max(
     0,
-    (sheetHeight || estimatedSheetHeight) - SHEET_PEEK_HEIGHT,
+    (sheetHeight || estimatedSheetHeight) - SHEET_BOTTOM_OVERSCAN - SHEET_PEEK_HEIGHT,
+  );
+  const minimizedOffset = Math.max(
+    collapsedOffset,
+    (sheetHeight || estimatedSheetHeight) - SHEET_BOTTOM_OVERSCAN - SHEET_MINIMIZED_HEIGHT,
   );
 
   const loadCampusBuildings = useCallback(async () => {
@@ -327,13 +304,16 @@ export default function App() {
 
   useEffect(() => {
     if (!searchOpen) {
-      sheetTranslateY.value = collapsedOffset;
+      sheetTranslateY.value = lobbyMinimized ? minimizedOffset : collapsedOffset;
     }
-  }, [collapsedOffset, searchOpen, sheetTranslateY]);
+  }, [collapsedOffset, lobbyMinimized, minimizedOffset, searchOpen, sheetTranslateY]);
 
   useEffect(() => {
     if (!searchOpen) return;
-    sheetTranslateY.value = withSpring(0, { damping: 18, stiffness: 180 }, (finished) => {
+    sheetTranslateY.value = withTiming(0, {
+      duration: SHEET_TRANSITION_DURATION,
+      easing: Easing.out(Easing.cubic),
+    }, (finished) => {
       if (!finished) return;
       runOnJS(focusPendingInput)();
     });
@@ -363,20 +343,15 @@ export default function App() {
 
       if (treeResult.status === "fulfilled") {
         setTreeShadowMap(treeResult.value);
-        setTreeShadeError(false);
       } else {
         setTreeShadowMap(null);
-        setTreeShadeError(true);
       }
 
       if (buildingResult.status === "fulfilled") {
         setBuildingShadowMap(buildingResult.value);
-        setBuildingShadeError(false);
       } else {
         setBuildingShadowMap(null);
-        setBuildingShadeError(true);
       }
-      setShadeLoading(false);
     }
 
     const interactionTask = InteractionManager.runAfterInteractions(() => {
@@ -393,7 +368,7 @@ export default function App() {
   useEffect(() => {
     if (route?.geometry.length) {
       mapRef.current?.fitToCoordinates(route.geometry, {
-        edgePadding: { top: 150, right: 48, bottom: SHEET_PEEK_HEIGHT + 24, left: 48 },
+        edgePadding: { top: 150, right: 48, bottom: SHEET_MINIMIZED_HEIGHT + 24, left: 48 },
         animated: true,
       });
     }
@@ -429,22 +404,11 @@ export default function App() {
     [activeQuery, buildings],
   );
   const searchResults = matchingBuildings.slice(0, 8);
-  const shadeStatus = formatShadeStatus(
-    shadeLoading,
-    treeShadeError,
-    buildingShadeError,
-    treeShadowMap,
-    buildingShadowMap,
-  );
-  const shadeDaylight = treeShadowMap?.daylight ?? buildingShadowMap?.daylight ?? false;
-  const shadeUnavailable =
-    (treeShadeError || !treeShadowMap) && (buildingShadeError || !buildingShadowMap);
-
   async function requestRoute() {
     if (!originId || !destinationId || originId === destinationId) return;
     const requestId = routeRequestIdRef.current + 1;
     routeRequestIdRef.current = requestId;
-    closeSearch();
+    minimizeSheet();
     setRouting(true);
     setError(null);
     try {
@@ -491,6 +455,7 @@ export default function App() {
 
   function expandSheet(field?: SearchField) {
     if (field) setActiveField(field);
+    setLobbyMinimized(false);
     cancelAnimation(sheetTranslateY);
     if (!searchOpen) {
       pendingFocusRef.current = field ?? null;
@@ -498,7 +463,10 @@ export default function App() {
       return;
     }
     if (field) pendingFocusRef.current = null;
-    sheetTranslateY.value = withSpring(0, { damping: 18, stiffness: 180 });
+    sheetTranslateY.value = withTiming(0, {
+      duration: SHEET_TRANSITION_DURATION,
+      easing: Easing.out(Easing.cubic),
+    });
   }
 
   function openSearch(field: SearchField) {
@@ -508,9 +476,26 @@ export default function App() {
   function closeSearch() {
     dismissKeyboard();
     pendingFocusRef.current = null;
+    setLobbyMinimized(false);
     cancelAnimation(sheetTranslateY);
     sheetTranslateY.value = withTiming(collapsedOffset, {
-      duration: 220,
+      duration: SHEET_TRANSITION_DURATION,
+      easing: Easing.out(Easing.cubic),
+    }, (finished) => {
+      if (finished) {
+        sheetScrollOffset.value = 0;
+        runOnJS(setSearchOpen)(false);
+      }
+    });
+  }
+
+  function minimizeSheet() {
+    dismissKeyboard();
+    pendingFocusRef.current = null;
+    setLobbyMinimized(true);
+    cancelAnimation(sheetTranslateY);
+    sheetTranslateY.value = withTiming(minimizedOffset, {
+      duration: SHEET_TRANSITION_DURATION,
       easing: Easing.out(Easing.cubic),
     }, (finished) => {
       if (finished) {
@@ -563,12 +548,36 @@ export default function App() {
           sheetWasDragged.value = true;
           const dragDistance = gesture.translationY - sheetGestureOffset.value;
           const nextPosition = sheetDragStart.value + dragDistance;
-          sheetTranslateY.value = Math.max(0, Math.min(collapsedOffset, nextPosition));
+          sheetTranslateY.value = Math.max(0, Math.min(minimizedOffset, nextPosition));
         })
         .onEnd((gesture) => {
           if (!sheetWasDragged.value) return;
           const movingUp = gesture.velocityY < -350;
           const movingDown = gesture.velocityY > 350;
+
+          if (!searchOpen) {
+            const startedMinimized = sheetDragStart.value > collapsedOffset + 24;
+            const belowLobbyMidpoint =
+              sheetTranslateY.value > (collapsedOffset + minimizedOffset) * 0.5;
+
+            if (movingDown || (!movingUp && belowLobbyMidpoint)) {
+              runOnJS(setLobbyMinimized)(true);
+              sheetTranslateY.value = withTiming(minimizedOffset, {
+                duration: SHEET_TRANSITION_DURATION,
+                easing: Easing.out(Easing.cubic),
+              });
+            } else if (startedMinimized) {
+              runOnJS(setLobbyMinimized)(false);
+              sheetTranslateY.value = withTiming(collapsedOffset, {
+                duration: SHEET_TRANSITION_DURATION,
+                easing: Easing.out(Easing.cubic),
+              });
+            } else {
+              runOnJS(expandSheet)();
+            }
+            return;
+          }
+
           const aboveMidpoint = sheetTranslateY.value < collapsedOffset * 0.5;
           if (movingUp || (!movingDown && aboveMidpoint)) {
             runOnJS(expandSheet)();
@@ -578,6 +587,7 @@ export default function App() {
         }),
     [
       collapsedOffset,
+      minimizedOffset,
       resultsScrollGesture,
       searchOpen,
       sheetDragStart,
@@ -602,7 +612,7 @@ export default function App() {
       <StatusBar backgroundColor="transparent" barStyle="dark-content" translucent />
       <MapView
         initialRegion={TAMU_REGION}
-        onPress={dismissKeyboard}
+        onPress={minimizeSheet}
         ref={mapRef}
         style={styles.map}
       >
@@ -672,25 +682,6 @@ export default function App() {
               </Text>
             </View>
           )}
-
-          <View
-            pointerEvents="none"
-            style={[styles.shadeCard, { bottom: SHEET_PEEK_HEIGHT + 12 }]}
-          >
-            {shadeLoading ? (
-              <ActivityIndicator color={GREEN} size="small" />
-            ) : (
-              <View
-                style={[
-                  styles.shadeDot,
-                  (shadeUnavailable || !shadeDaylight) && styles.shadeDotInactive,
-                ]}
-              />
-            )}
-            <Text numberOfLines={2} style={styles.shadeText}>
-              {shadeStatus}
-            </Text>
-          </View>
 
           <GestureDetector gesture={sheetGesture}>
             <Animated.View
@@ -944,33 +935,11 @@ const styles = StyleSheet.create({
   routeCardLabel: { color: GREEN, fontSize: 9, fontWeight: "800", letterSpacing: 1 },
   routeCardValue: { color: MAROON, fontSize: 17, fontWeight: "800", marginTop: 2 },
   routeCardShade: { color: "#62574D", fontSize: 11, fontWeight: "700", marginTop: 3 },
-  shadeCard: {
-    position: "absolute",
-    right: 14,
-    left: 14,
-    zIndex: 9,
-    minHeight: 34,
-    borderRadius: 12,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    backgroundColor: "rgba(255,255,255,0.95)",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    shadowColor: "#2F2924",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  shadeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: GREEN },
-  shadeDotInactive: { backgroundColor: "#9A9087" },
-  shadeText: { flex: 1, color: "#4B433D", fontSize: 10, fontWeight: "700", lineHeight: 13 },
   selectionArea: {
     position: "absolute",
     top: SHEET_TOP,
     right: 0,
-    bottom: 0,
+    bottom: -SHEET_BOTTOM_OVERSCAN,
     left: 0,
     zIndex: 100,
     elevation: 20,
