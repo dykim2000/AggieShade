@@ -1,12 +1,9 @@
 import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Animated,
-  Easing,
   InteractionManager,
   Keyboard,
   KeyboardAvoidingView,
-  PanResponder,
   Platform,
   Pressable,
   SafeAreaView,
@@ -18,7 +15,18 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import MapView, { Geojson, Marker, Polyline } from "react-native-maps";
+import Animated, {
+  cancelAnimation,
+  Easing,
+  runOnJS,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 
 import { getBuildings, getBuildingShadowMap, getRoute, getTreeShadowMap } from "./src/api";
 import type {
@@ -266,9 +274,11 @@ export default function App() {
   const mapRef = useRef<MapView>(null);
   const originInputRef = useRef<TextInput>(null);
   const destinationInputRef = useRef<TextInput>(null);
-  const sheetTranslateY = useRef(new Animated.Value(estimatedCollapsedOffset)).current;
-  const sheetPositionRef = useRef(estimatedCollapsedOffset);
-  const sheetDragStartRef = useRef(estimatedCollapsedOffset);
+  const sheetTranslateY = useSharedValue(estimatedCollapsedOffset);
+  const sheetDragStart = useSharedValue(estimatedCollapsedOffset);
+  const sheetScrollOffset = useSharedValue(0);
+  const sheetGestureOffset = useSharedValue(0);
+  const sheetWasDragged = useSharedValue(false);
   const pendingFocusRef = useRef<SearchField | null>(null);
   const routeRequestIdRef = useRef(0);
   const [sheetHeight, setSheetHeight] = useState(0);
@@ -316,35 +326,27 @@ export default function App() {
   }, [loadCampusBuildings]);
 
   useEffect(() => {
-    const listenerId = sheetTranslateY.addListener(({ value }) => {
-      sheetPositionRef.current = value;
-    });
-    return () => sheetTranslateY.removeListener(listenerId);
-  }, [sheetTranslateY]);
-
-  useEffect(() => {
     if (!searchOpen) {
-      sheetTranslateY.setValue(collapsedOffset);
+      sheetTranslateY.value = collapsedOffset;
     }
   }, [collapsedOffset, searchOpen, sheetTranslateY]);
 
   useEffect(() => {
     if (!searchOpen) return;
-    const openAnimation = Animated.spring(sheetTranslateY, {
-      toValue: 0,
-      speed: 18,
-      bounciness: 4,
-      useNativeDriver: true,
-    });
-    openAnimation.start(({ finished }) => {
+    sheetTranslateY.value = withSpring(0, { damping: 18, stiffness: 180 }, (finished) => {
       if (!finished) return;
+      runOnJS(focusPendingInput)();
+    });
+
+    function focusPendingInput() {
       const field = pendingFocusRef.current;
       pendingFocusRef.current = null;
       if (!field) return;
       const inputRef = field === "origin" ? originInputRef : destinationInputRef;
       requestAnimationFrame(() => inputRef.current?.focus());
-    });
-    return () => openAnimation.stop();
+    }
+
+    return () => cancelAnimation(sheetTranslateY);
   }, [searchOpen, sheetTranslateY]);
 
   useEffect(() => {
@@ -489,19 +491,14 @@ export default function App() {
 
   function expandSheet(field?: SearchField) {
     if (field) setActiveField(field);
-    sheetTranslateY.stopAnimation();
+    cancelAnimation(sheetTranslateY);
     if (!searchOpen) {
       pendingFocusRef.current = field ?? null;
       setSearchOpen(true);
       return;
     }
     if (field) pendingFocusRef.current = null;
-    Animated.spring(sheetTranslateY, {
-      toValue: 0,
-      speed: 18,
-      bounciness: 4,
-      useNativeDriver: true,
-    }).start();
+    sheetTranslateY.value = withSpring(0, { damping: 18, stiffness: 180 });
   }
 
   function openSearch(field: SearchField) {
@@ -511,14 +508,15 @@ export default function App() {
   function closeSearch() {
     dismissKeyboard();
     pendingFocusRef.current = null;
-    sheetTranslateY.stopAnimation();
-    Animated.timing(sheetTranslateY, {
-      toValue: collapsedOffset,
+    cancelAnimation(sheetTranslateY);
+    sheetTranslateY.value = withTiming(collapsedOffset, {
       duration: 220,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) setSearchOpen(false);
+    }, (finished) => {
+      if (finished) {
+        sheetScrollOffset.value = 0;
+        runOnJS(setSearchOpen)(false);
+      }
     });
   }
 
@@ -544,46 +542,63 @@ export default function App() {
     }
   }
 
-  const sheetPanResponder = useMemo(
+  const resultsScrollGesture = useMemo(() => Gesture.Native(), []);
+  const sheetGesture = useMemo(
     () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_, gesture) =>
-          Math.abs(gesture.dy) > 5 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
-        onPanResponderGrant: () => {
-          sheetTranslateY.stopAnimation((value) => {
-            sheetDragStartRef.current = value;
-          });
-        },
-        onPanResponderMove: (_, gesture) => {
-          const nextPosition = Math.max(
-            0,
-            Math.min(collapsedOffset, sheetDragStartRef.current + gesture.dy),
-          );
-          sheetTranslateY.setValue(nextPosition);
-        },
-        onPanResponderRelease: (_, gesture) => {
-          const movingUp = gesture.vy < -0.35;
-          const movingDown = gesture.vy > 0.35;
-          const aboveMidpoint = sheetPositionRef.current < collapsedOffset * 0.5;
-          if (movingUp || (!movingDown && aboveMidpoint)) {
-            expandSheet();
-          } else {
-            closeSearch();
+      Gesture.Pan()
+        .activeOffsetY([-5, 5])
+        .failOffsetX([-12, 12])
+        .simultaneousWithExternalGesture(resultsScrollGesture)
+        .onBegin(() => {
+          cancelAnimation(sheetTranslateY);
+          sheetDragStart.value = sheetTranslateY.value;
+          sheetGestureOffset.value = 0;
+          sheetWasDragged.value = false;
+        })
+        .onUpdate((gesture) => {
+          if (searchOpen && sheetScrollOffset.value > 0) {
+            sheetGestureOffset.value = gesture.translationY;
+            return;
           }
-        },
-        onPanResponderTerminate: () => {
-          if (searchOpen) expandSheet();
-          else closeSearch();
-        },
-      }),
-    [collapsedOffset, searchOpen, sheetTranslateY],
+          sheetWasDragged.value = true;
+          const dragDistance = gesture.translationY - sheetGestureOffset.value;
+          const nextPosition = sheetDragStart.value + dragDistance;
+          sheetTranslateY.value = Math.max(0, Math.min(collapsedOffset, nextPosition));
+        })
+        .onEnd((gesture) => {
+          if (!sheetWasDragged.value) return;
+          const movingUp = gesture.velocityY < -350;
+          const movingDown = gesture.velocityY > 350;
+          const aboveMidpoint = sheetTranslateY.value < collapsedOffset * 0.5;
+          if (movingUp || (!movingDown && aboveMidpoint)) {
+            runOnJS(expandSheet)();
+          } else {
+            runOnJS(closeSearch)();
+          }
+        }),
+    [
+      collapsedOffset,
+      resultsScrollGesture,
+      searchOpen,
+      sheetDragStart,
+      sheetGestureOffset,
+      sheetScrollOffset,
+      sheetTranslateY,
+      sheetWasDragged,
+    ],
   );
+
+  const sheetAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: sheetTranslateY.value }],
+  }));
+  const resultsScrollHandler = useAnimatedScrollHandler((event) => {
+    sheetScrollOffset.value = event.contentOffset.y;
+  });
 
   const activeSelectionId = activeField === "origin" ? originId : destinationId;
 
   return (
-    <View style={styles.appRoot}>
+    <GestureHandlerRootView style={styles.appRoot}>
       <StatusBar backgroundColor="transparent" barStyle="dark-content" translucent />
       <MapView
         initialRegion={TAMU_REGION}
@@ -640,9 +655,6 @@ export default function App() {
               <Text style={styles.eyebrow}>TEXAS A&M CAMPUS</Text>
               <Text style={styles.title}>AggieShade</Text>
             </View>
-            <View style={styles.milestoneBadge}>
-              <Text style={styles.milestoneText}>WALKING ROUTES</Text>
-            </View>
           </View>
 
           {route && (
@@ -680,14 +692,12 @@ export default function App() {
             </Text>
           </View>
 
-          <Animated.View
-            onLayout={(event) => setSheetHeight(event.nativeEvent.layout.height)}
-            style={[
-              styles.selectionArea,
-              { transform: [{ translateY: sheetTranslateY }] },
-            ]}
-          >
-            <View style={styles.sheetDragArea} {...sheetPanResponder.panHandlers}>
+          <GestureDetector gesture={sheetGesture}>
+            <Animated.View
+              onLayout={(event) => setSheetHeight(event.nativeEvent.layout.height)}
+              style={[styles.selectionArea, sheetAnimatedStyle]}
+            >
+            <View style={styles.sheetDragArea}>
               <Pressable
                 accessibilityHint={searchOpen ? "Returns to the map" : "Shows places and search results"}
                 accessibilityLabel={searchOpen ? "Collapse route planner" : "Expand route planner"}
@@ -701,7 +711,6 @@ export default function App() {
                     <Text style={styles.sheetEyebrow}>ROUTE PLANNER</Text>
                     <Text style={styles.sheetTitle}>Plan your walk</Text>
                   </View>
-                  <Text style={styles.sheetHint}>{searchOpen ? "Swipe down" : "Swipe up"}</Text>
                 </View>
               </Pressable>
             </View>
@@ -821,10 +830,13 @@ export default function App() {
                   </View>
 
                   {searchOpen && (
-                    <ScrollView
+                    <GestureDetector gesture={resultsScrollGesture}>
+                    <Animated.ScrollView
                       contentContainerStyle={styles.expandedContent}
                       keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                       keyboardShouldPersistTaps="handled"
+                      onScroll={resultsScrollHandler}
+                      scrollEventThrottle={16}
                       showsVerticalScrollIndicator={false}
                       style={styles.panelScroll}
                     >
@@ -873,15 +885,17 @@ export default function App() {
                         onPress={dismissKeyboard}
                         style={styles.dismissArea}
                       />
-                    </ScrollView>
+                    </Animated.ScrollView>
+                    </GestureDetector>
                   )}
                 </>
               )}
             </KeyboardAvoidingView>
-          </Animated.View>
+            </Animated.View>
+          </GestureDetector>
         </View>
       </SafeAreaView>
-    </View>
+    </GestureHandlerRootView>
   );
 }
 
@@ -893,7 +907,6 @@ const styles = StyleSheet.create({
   header: {
     position: "absolute",
     top: 8,
-    right: 14,
     left: 14,
     zIndex: 10,
     minHeight: 58,
@@ -903,9 +916,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(80,0,0,0.14)",
     borderRadius: 18,
     backgroundColor: "rgba(255,255,255,0.95)",
-    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     shadowColor: "#2F2924",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.14,
@@ -914,14 +925,6 @@ const styles = StyleSheet.create({
   },
   eyebrow: { color: GREEN, fontSize: 10, fontWeight: "700", letterSpacing: 1.4 },
   title: { color: MAROON, fontSize: 24, fontWeight: "800", letterSpacing: -0.6 },
-  milestoneBadge: {
-    borderColor: "#D7C8B9",
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  milestoneText: { color: "#6F6258", fontSize: 9, fontWeight: "700", letterSpacing: 0.7 },
   routeCard: {
     position: "absolute",
     top: 78,
@@ -1004,16 +1007,6 @@ const styles = StyleSheet.create({
   },
   sheetEyebrow: { color: GREEN, fontSize: 9, fontWeight: "800", letterSpacing: 1.1 },
   sheetTitle: { marginTop: 1, color: "#2F2924", fontSize: 23, fontWeight: "800", letterSpacing: -0.5 },
-  sheetHint: {
-    overflow: "hidden",
-    paddingHorizontal: 11,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: "#EEE9E2",
-    color: "#6F6258",
-    fontSize: 10,
-    fontWeight: "800",
-  },
   keyboardPanel: { flex: 1 },
   routeForm: { paddingHorizontal: 16, paddingTop: 3, paddingBottom: 8, gap: 8 },
   panelScroll: { flex: 1 },
