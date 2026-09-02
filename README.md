@@ -110,6 +110,20 @@ curl 'http://127.0.0.1:8000/routes' \
 
 The response includes physical distance, ETA, shaded distance, shade percentage, daylight status, the normalized shade-bucket time, and route geometry. At night, both preferences intentionally return the same shortest path with 0% modeled solar shade. Fastest and shadiest routes may also be identical when no useful shaded alternative exists. Trees and buildings excluded by the source-data quality rules are conservatively treated as unshaded, so coverage remains an estimate pending field validation.
 
+### Field validation
+
+The [`field_validation`](field_validation) collection kit records real shadow and route
+measurements beside the model predictions. It includes a blank session dataset, valid examples,
+collection instructions, and a validator for timestamps, coordinates, measurements, evidence,
+and observation IDs. From `backend`, validate a session with:
+
+```bash
+./.venv/bin/python scripts/validate_field_observations.py ../field_validation/observations.json
+```
+
+Store referenced photos in `field_validation/photos/`; that directory is intentionally ignored
+to prevent large or privacy-sensitive field media from entering Git history.
+
 ## Pedestrian routing data
 
 The bundled graph in `backend/app/data/pedestrian_graph.json` is derived from [OpenStreetMap](https://www.openstreetmap.org/) data and is available under the [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) license. Texas A&M's [official sidewalk layer](https://gis.tamu.edu/arcgis/rest/services/FCOR/TAMU_BaseMap/MapServer/18) can be used for visual validation.
