@@ -10,3 +10,4 @@ __pycache__/
 .DS_Store
 tmp/
 field_validation/photos/
+field_validation/*_report.json

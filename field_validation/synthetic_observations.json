@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "observations": [
+    {
+      "observation_id": "synthetic-shadow-tree",
+      "observation_type": "shadow",
+      "observed_at": "2026-09-02T09:00:00-05:00",
+      "collector": "synthetic test",
+      "location": {"latitude": 30.6168, "longitude": -96.3411, "gps_accuracy_m": 3.0},
+      "conditions": {"cloud_condition": "clear", "notes": "Synthetic case."},
+      "subject": {"object_type": "tree", "source_feature_id": "synthetic-tree"},
+      "observed": {"shadow_bearing_degrees": 358.0, "shadow_length_m": 10.0, "walkway_shade_fraction": 0.4},
+      "predicted": {"shadow_bearing_degrees": 2.0, "shadow_length_m": 12.0, "walkway_shade_fraction": 0.5},
+      "evidence": {"photo_files": ["synthetic-tree.jpg"], "notes": "No real photo required."},
+      "notes": "Tests north-crossing bearing error."
+    },
+    {
+      "observation_id": "synthetic-shadow-building",
+      "observation_type": "shadow",
+      "observed_at": "2026-09-02T15:00:00-05:00",
+      "collector": "synthetic test",
+      "location": {"latitude": 30.617, "longitude": -96.341, "gps_accuracy_m": 3.0},
+      "conditions": {"cloud_condition": "clear", "notes": "Synthetic case."},
+      "subject": {"object_type": "building", "source_feature_id": "synthetic-building"},
+      "observed": {"shadow_bearing_degrees": 100.0, "shadow_length_m": 20.0, "walkway_shade_fraction": 0.7},
+      "predicted": {"shadow_bearing_degrees": 110.0, "shadow_length_m": 18.0, "walkway_shade_fraction": 0.65},
+      "evidence": {"photo_files": ["synthetic-building.jpg"], "notes": "No real photo required."},
+      "notes": "Tests ordinary bearing error."
+    },
+    {
+      "observation_id": "synthetic-route-fastest",
+      "observation_type": "route",
+      "observed_at": "2026-09-02T12:00:00-05:00",
+      "collector": "synthetic test",
+      "location": {"latitude": 30.6168, "longitude": -96.3411, "gps_accuracy_m": 4.0},
+      "conditions": {"cloud_condition": "clear", "notes": "Synthetic case."},
+      "route": {"origin_id": "zachry", "destination_id": "msc", "preference": "fastest"},
+      "observed": {"distance_m": 1000.0, "duration_seconds": 800.0, "shade_fraction": 0.3},
+      "predicted": {"distance_m": 1100.0, "duration_seconds": 900.0, "shade_fraction": 0.4},
+      "evidence": {"photo_files": ["synthetic-fastest.jpg"], "notes": "No real photo required."},
+      "notes": "Known positive prediction errors."
+    },
+    {
+      "observation_id": "synthetic-route-shadiest",
+      "observation_type": "route",
+      "observed_at": "2026-09-02T12:15:00-05:00",
+      "collector": "synthetic test",
+      "location": {"latitude": 30.6168, "longitude": -96.3411, "gps_accuracy_m": 4.0},
+      "conditions": {"cloud_condition": "partly_cloudy", "notes": "Synthetic case."},
+      "route": {"origin_id": "zachry", "destination_id": "msc", "preference": "shadiest"},
+      "observed": {"distance_m": 1200.0, "duration_seconds": 1000.0, "shade_fraction": 0.6},
+      "predicted": {"distance_m": 1150.0, "duration_seconds": 950.0, "shade_fraction": 0.55},
+      "evidence": {"photo_files": ["synthetic-shadiest.jpg"], "notes": "No real photo required."},
+      "notes": "Known negative prediction errors."
+    }
+  ]
+}

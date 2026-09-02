@@ -47,3 +47,19 @@ From `backend`, run:
 The validator rejects missing timezone offsets, invalid coordinates, out-of-range fractions,
 unsupported categories, missing evidence filenames, incomplete type-specific measurements, and
 duplicate observation IDs.
+
+## Run indoor synthetic checks
+
+`synthetic_observations.json` contains four deterministic cases with known errors, including a
+shadow bearing that crosses true north. Analyze it without collecting field data:
+
+```bash
+./.venv/bin/python scripts/analyze_field_observations.py \
+  ../field_validation/synthetic_observations.json \
+  --output ../field_validation/synthetic_report.json
+```
+
+The report includes per-observation absolute errors and aggregate mean absolute errors for shadow
+bearing, shadow length, walkway shade, route distance, route duration, and route shade. Percentage
+errors are reported as `null` when the observed value is zero, avoiding division by zero. The same
+command can analyze `observations.json` later without changing the format.
