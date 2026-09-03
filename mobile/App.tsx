@@ -99,6 +99,13 @@ function formatDuration(seconds: number): string {
   return `${Math.max(1, Math.round(seconds / 60))} min`;
 }
 
+function formatRouteShadeTime(timestamp: string): string {
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function buildingMatchScore(building: Building, query: string): number | null {
   const search = query.trim().toLocaleLowerCase();
   if (!search) return null;
@@ -668,6 +675,9 @@ export default function App() {
                   ? `${route.shade_percentage.toFixed(0)}% shaded · ${formatDistance(route.shaded_distance_m)} in shade`
                   : "Nighttime · shade routing inactive"}
               </Text>
+              <Text style={styles.routeCardTime}>
+                Shade calculated for {formatRouteShadeTime(route.shade_bucket_start)}
+              </Text>
             </View>
           )}
 
@@ -891,6 +901,7 @@ const styles = StyleSheet.create({
   routeCardLabel: { color: GREEN, fontSize: 9, fontWeight: "800", letterSpacing: 1 },
   routeCardValue: { color: MAROON, fontSize: 17, fontWeight: "800", marginTop: 2 },
   routeCardShade: { color: "#62574D", fontSize: 11, fontWeight: "700", marginTop: 3 },
+  routeCardTime: { color: "#857970", fontSize: 10, fontWeight: "600", marginTop: 3 },
   selectionArea: {
     position: "absolute",
     top: SHEET_TOP,
