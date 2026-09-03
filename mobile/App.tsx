@@ -33,7 +33,6 @@ import type {
   BuildingShadowGeoJson,
   BuildingShadowMap,
   Route,
-  RoutePreference,
   TreeShadowGeoJson,
   TreeShadowMap,
 } from "./src/types";
@@ -265,7 +264,6 @@ export default function App() {
   const [destinationQuery, setDestinationQuery] = useState("");
   const [activeField, setActiveField] = useState<SearchField>("destination");
   const [route, setRoute] = useState<Route | null>(null);
-  const [routePreference, setRoutePreference] = useState<RoutePreference>("shadiest");
   const [loading, setLoading] = useState(true);
   const [routing, setRouting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -413,7 +411,7 @@ export default function App() {
     setRouting(true);
     setError(null);
     try {
-      const nextRoute = await getRoute(originId, destinationId, routePreference, new Date());
+      const nextRoute = await getRoute(originId, destinationId, "shadiest", new Date());
       if (requestId === routeRequestIdRef.current) setRoute(nextRoute);
     } catch (requestError: unknown) {
       if (requestId === routeRequestIdRef.current) {
@@ -437,15 +435,6 @@ export default function App() {
       setDestinationQuery(value);
       setDestinationId(null);
     }
-  }
-
-  function updateRoutePreference(preference: RoutePreference) {
-    if (preference === routePreference) return;
-    routeRequestIdRef.current += 1;
-    setRouting(false);
-    setRoutePreference(preference);
-    setRoute(null);
-    setError(null);
   }
 
   function dismissKeyboard() {
@@ -670,9 +659,7 @@ export default function App() {
 
           {route && (
             <View pointerEvents="none" style={styles.routeCard}>
-              <Text style={styles.routeCardLabel}>
-                {route.preference === "shadiest" ? "SHADIEST ROUTE" : "FASTEST ROUTE"}
-              </Text>
+              <Text style={styles.routeCardLabel}>SHADIEST ROUTE</Text>
               <Text style={styles.routeCardValue}>
                 {formatDuration(route.duration_seconds)} · {formatDistance(route.distance_m)}
               </Text>
@@ -744,38 +731,6 @@ export default function App() {
                       onOpen={openSearch}
                       value={destinationQuery}
                     />
-
-                    <View style={styles.preferenceGroup}>
-                      <Text style={styles.searchLabel}>Route preference</Text>
-                      <View accessibilityRole="radiogroup" style={styles.preferenceControl}>
-                        {(["fastest", "shadiest"] as const).map((preference) => {
-                          const selected = preference === routePreference;
-                          return (
-                            <Pressable
-                              accessibilityRole="radio"
-                              accessibilityState={{ disabled: routing, selected }}
-                              disabled={routing}
-                              key={preference}
-                              onPress={() => updateRoutePreference(preference)}
-                              style={({ pressed }) => [
-                                styles.preferenceButton,
-                                selected && styles.preferenceButtonSelected,
-                                pressed && styles.pressed,
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.preferenceButtonText,
-                                  selected && styles.preferenceButtonTextSelected,
-                                ]}
-                              >
-                                {preference === "fastest" ? "Fastest" : "Shadiest"}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    </View>
 
                     <View style={styles.actionArea}>
                       {error && <Text numberOfLines={2} style={styles.error}>{error}</Text>}
@@ -1013,32 +968,6 @@ const styles = StyleSheet.create({
   fieldBadgeText: { color: "white", fontSize: 11, fontWeight: "800" },
   searchInput: { flex: 1, color: "#2F2924", fontSize: 15, paddingVertical: 10 },
   searchOpenTarget: { ...ABSOLUTE_FILL, zIndex: 1, borderRadius: 14 },
-  preferenceGroup: { gap: 3 },
-  preferenceControl: {
-    minHeight: 40,
-    padding: 3,
-    borderRadius: 13,
-    backgroundColor: "#EDE7E0",
-    flexDirection: "row",
-    gap: 3,
-  },
-  preferenceButton: {
-    flex: 1,
-    minHeight: 34,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  preferenceButtonSelected: {
-    backgroundColor: "white",
-    shadowColor: "#2F2924",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  preferenceButtonText: { color: "#746A62", fontSize: 13, fontWeight: "700" },
-  preferenceButtonTextSelected: { color: MAROON, fontWeight: "800" },
   resultsSection: {
     borderWidth: 1,
     borderColor: "#E1D8CF",
