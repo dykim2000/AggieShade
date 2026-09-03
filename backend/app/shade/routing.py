@@ -19,6 +19,7 @@ from ..campus import (
     EDGE_DISTANCES_M,
     NODES,
     _shortest_path,
+    nearest_routable_node,
 )
 from ..gis.tamu import wgs84_to_utm14
 from .buildings import building_shadows_at
@@ -29,6 +30,7 @@ from .trees import tree_shadows_at
 RoutePreference = Literal["fastest", "shadiest"]
 SHADE_DISCOUNT = 0.70
 SHADE_EDGE_CACHE_SIZE = 8
+MAX_LOCATION_SNAP_DISTANCE_M = 500
 
 
 @dataclass(frozen=True)
@@ -173,6 +175,58 @@ def shade_route_between(
     if preference not in ("fastest", "shadiest"):
         raise ValueError("preference must be fastest or shadiest")
 
+    return _shade_route_between_nodes(
+        origin_id,
+        BUILDING_NODES[origin_id],
+        destination_id,
+        preference=preference,
+        observed_at=observed_at,
+    )
+
+
+def shade_route_from_point(
+    origin: tuple[float, float],
+    destination_id: str,
+    *,
+    preference: RoutePreference,
+    observed_at: datetime,
+) -> ShadeRoute:
+    """Route from a user's WGS 84 position after snapping it to the walkway graph."""
+
+    if destination_id not in BUILDINGS:
+        raise KeyError("Unknown TAMU building")
+    if not (-90 <= origin[0] <= 90 and -180 <= origin[1] <= 180):
+        raise ValueError("Location coordinates are outside valid WGS 84 bounds")
+    origin_node, snap_distance = nearest_routable_node(origin)
+    if snap_distance > MAX_LOCATION_SNAP_DISTANCE_M:
+        raise ValueError("Your location is outside the supported Texas A&M campus routing area")
+    if origin_node == BUILDING_NODES[destination_id]:
+        raise RuntimeError("Your location is already at the destination's pedestrian access point")
+
+    return _shade_route_between_nodes(
+        "my-location",
+        origin_node,
+        destination_id,
+        preference=preference,
+        observed_at=observed_at,
+        origin_point=origin,
+        origin_snap_distance=snap_distance,
+    )
+
+
+def _shade_route_between_nodes(
+    origin_id: str,
+    origin_node: str,
+    destination_id: str,
+    *,
+    preference: RoutePreference,
+    observed_at: datetime,
+    origin_point: tuple[float, float] | None = None,
+    origin_snap_distance: float = 0,
+) -> ShadeRoute:
+    if preference not in ("fastest", "shadiest"):
+        raise ValueError("preference must be fastest or shadiest")
+
     shade_bucket = edge_shade_at(observed_at)
     edge_costs = None
     if preference == "shadiest":
@@ -183,10 +237,11 @@ def shade_route_between(
         }
 
     path, distance = _shortest_path(
-        BUILDING_NODES[origin_id],
+        origin_node,
         BUILDING_NODES[destination_id],
         edge_costs,
     )
+    distance += origin_snap_distance
     shaded_distance = sum(
         EDGE_DISTANCES_M[edge_key] * shade_bucket.edge_fractions[edge_key]
         for left_id, right_id in zip(path, path[1:])
@@ -204,7 +259,9 @@ def shade_route_between(
         shade_percentage=round(shade_percentage, 1),
         shade_bucket_start=shade_bucket.bucket_start,
         daylight=shade_bucket.daylight,
-        geometry=tuple(NODES[node_id] for node_id in path),
+        geometry=(origin_point,) + tuple(NODES[node_id] for node_id in path)
+        if origin_point is not None
+        else tuple(NODES[node_id] for node_id in path),
     )
 
 

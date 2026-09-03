@@ -110,6 +110,12 @@ curl 'http://127.0.0.1:8000/routes' \
 
 The response includes physical distance, ETA, shaded distance, shade percentage, daylight status, the normalized shade-bucket time, and route geometry. At night, both preferences intentionally return the same shortest path with 0% modeled solar shade. Fastest and shadiest routes may also be identical when no useful shaded alternative exists. Trees and buildings excluded by the source-data quality rules are conservatively treated as unshaded, so coverage remains an estimate pending field validation.
 
+The mobile app can also use a one-time foreground location as the route origin. Permission is
+requested only after the user taps **My Location**. Coordinate origins are snapped to the connected
+pedestrian graph and must be within 500 meters of it; destinations remain named campus buildings.
+The route API accepts `origin: {"latitude": ..., "longitude": ...}` instead of `origin_id` for
+this case. Exactly one origin form must be provided.
+
 ### Field validation
 
 The [`field_validation`](field_validation) collection kit records real shadow and route

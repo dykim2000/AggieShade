@@ -41,6 +41,52 @@ class RoutesApiTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn("UTC offset", raised.exception.detail)
 
+    def test_route_accepts_a_coordinate_origin(self) -> None:
+        response = create_route(
+            RouteRequest.model_validate(
+                {
+                    "origin": {"latitude": 30.6212, "longitude": -96.3409},
+                    "destination_id": "msc",
+                    "preference": "shadiest",
+                    "at": "2026-06-21T18:07:00Z",
+                }
+            )
+        )
+
+        self.assertEqual(response.origin_id, "my-location")
+        self.assertEqual(response.geometry[0].latitude, 30.6212)
+        self.assertEqual(response.geometry[0].longitude, -96.3409)
+        self.assertGreater(response.distance_m, 0)
+
+    def test_coordinate_origin_must_be_the_only_origin_and_near_campus(self) -> None:
+        base = {
+            "destination_id": "msc",
+            "preference": "shadiest",
+            "at": "2026-06-21T18:07:00Z",
+        }
+        with self.assertRaisesRegex(ValidationError, "exactly one"):
+            RouteRequest.model_validate(base)
+        with self.assertRaisesRegex(ValidationError, "exactly one"):
+            RouteRequest.model_validate(
+                {
+                    **base,
+                    "origin_id": "zachry",
+                    "origin": {"latitude": 30.6212, "longitude": -96.3409},
+                }
+            )
+
+        with self.assertRaises(HTTPException) as outside_campus:
+            create_route(
+                RouteRequest.model_validate(
+                    {
+                        **base,
+                        "origin": {"latitude": 30.2672, "longitude": -97.7431},
+                    }
+                )
+            )
+        self.assertEqual(outside_campus.exception.status_code, 400)
+        self.assertIn("outside", outside_campus.exception.detail)
+
     def test_route_rejects_unknown_or_identical_buildings(self) -> None:
         observed_at = datetime(2026, 6, 21, 18, tzinfo=timezone.utc)
         with self.assertRaises(HTTPException) as unknown:

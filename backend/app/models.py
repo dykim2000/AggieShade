@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .campus import BUILDING_NODES, NODES, Building
 from .shade.buildings import (
@@ -41,10 +41,17 @@ class BuildingResponse(BaseModel):
 
 
 class RouteRequest(BaseModel):
-    origin_id: str
+    origin_id: str | None = None
+    origin: PointResponse | None = None
     destination_id: str
     preference: RoutePreference
     at: datetime
+
+    @model_validator(mode="after")
+    def validate_origin(self) -> "RouteRequest":
+        if (self.origin_id is None) == (self.origin is None):
+            raise ValueError("Provide exactly one of origin_id or origin")
+        return self
 
 
 class RouteResponse(BaseModel):

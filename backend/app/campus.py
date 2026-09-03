@@ -232,6 +232,13 @@ BUILDING_SNAP_DISTANCE_M = {
 }
 
 
+def nearest_routable_node(point: Point) -> tuple[str, float]:
+    """Return the nearest connected pedestrian node and its straight-line distance."""
+
+    node_id = min(ROUTABLE_NODE_IDS, key=lambda candidate: _distance_m(point, NODES[candidate]))
+    return node_id, _distance_m(point, NODES[node_id])
+
+
 def _shortest_path(
     origin_node: str,
     destination_node: str,

@@ -1,6 +1,7 @@
 import type {
   Building,
   BuildingShadowMap,
+  Coordinate,
   Route,
   RoutePreference,
   TreeShadowMap,
@@ -38,7 +39,7 @@ export async function getBuildings(): Promise<Building[]> {
 }
 
 export async function getRoute(
-  originId: string,
+  origin: string | Coordinate,
   destinationId: string,
   preference: RoutePreference,
   at: Date,
@@ -47,7 +48,7 @@ export async function getRoute(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      origin_id: originId,
+      ...(typeof origin === "string" ? { origin_id: origin } : { origin }),
       destination_id: destinationId,
       preference,
       at: at.toISOString(),

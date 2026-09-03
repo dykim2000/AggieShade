@@ -16,6 +16,7 @@ import {
   View,
 } from "react-native";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import * as Location from "expo-location";
 import MapView, { Geojson, Marker, Polyline } from "react-native-maps";
 import Animated, {
   cancelAnimation,
@@ -32,6 +33,7 @@ import type {
   Building,
   BuildingShadowGeoJson,
   BuildingShadowMap,
+  Coordinate,
   Route,
   TreeShadowGeoJson,
   TreeShadowMap,
@@ -270,6 +272,8 @@ export default function App() {
   const [originId, setOriginId] = useState<string | null>(null);
   const [destinationId, setDestinationId] = useState<string | null>(null);
   const [originQuery, setOriginQuery] = useState("");
+  const [userLocation, setUserLocation] = useState<Coordinate | null>(null);
+  const [locating, setLocating] = useState(false);
   const [destinationQuery, setDestinationQuery] = useState("");
   const [activeField, setActiveField] = useState<SearchField>("destination");
   const [route, setRoute] = useState<Route | null>(null);
@@ -391,7 +395,13 @@ export default function App() {
     }
   }, [displayedRoute]);
 
-  const canRoute = Boolean(originId && destinationId && originId !== destinationId && !routing);
+  const canRoute = Boolean(
+    (originId || userLocation) &&
+      destinationId &&
+      (!originId || originId !== destinationId) &&
+      !routing &&
+      !locating,
+  );
   const originBuilding = useMemo(
     () => buildings.find((building) => building.id === originId) ?? null,
     [buildings, originId],
@@ -422,7 +432,7 @@ export default function App() {
   );
   const searchResults = matchingBuildings.slice(0, 8);
   async function requestRoute() {
-    if (!originId || !destinationId || originId === destinationId) return;
+    if ((!originId && !userLocation) || !destinationId || originId === destinationId) return;
     const requestId = routeRequestIdRef.current + 1;
     routeRequestIdRef.current = requestId;
     minimizeSheet();
@@ -430,9 +440,11 @@ export default function App() {
     setError(null);
     try {
       const requestedAt = new Date();
+      const routeOrigin = userLocation ?? originId;
+      if (!routeOrigin) return;
       const [shadiestResult, fastestResult] = await Promise.allSettled([
-        getRoute(originId, destinationId, "shadiest", requestedAt),
-        getRoute(originId, destinationId, "fastest", requestedAt),
+        getRoute(routeOrigin, destinationId, "shadiest", requestedAt),
+        getRoute(routeOrigin, destinationId, "fastest", requestedAt),
       ]);
       if (shadiestResult.status === "rejected") throw shadiestResult.reason;
       if (requestId === routeRequestIdRef.current) {
@@ -470,6 +482,7 @@ export default function App() {
     if (field === "origin") {
       setOriginQuery(value);
       setOriginId(null);
+      setUserLocation(null);
     } else {
       setDestinationQuery(value);
       setDestinationId(null);
@@ -483,6 +496,7 @@ export default function App() {
   }
 
   function swapRouteEndpoints() {
+    if (userLocation) return;
     routeRequestIdRef.current += 1;
     setRouting(false);
     setOriginId(destinationId);
@@ -494,6 +508,45 @@ export default function App() {
     setAlternativeRoute(null);
     setRouteChoice("shadiest");
     setError(null);
+  }
+
+  async function useCurrentLocation() {
+    setLocating(true);
+    setError(null);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== Location.PermissionStatus.GRANTED) {
+        setError("Location permission is needed to route from My Location.");
+        return;
+      }
+
+      const result = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const coordinate = {
+        latitude: result.coords.latitude,
+        longitude: result.coords.longitude,
+      };
+      routeRequestIdRef.current += 1;
+      setRouting(false);
+      setUserLocation(coordinate);
+      setOriginId(null);
+      setOriginQuery("My Location");
+      setActiveField("destination");
+      setRoute(null);
+      setAlternativeRoute(null);
+      setRouteChoice("shadiest");
+      mapRef.current?.animateToRegion(
+        { ...coordinate, latitudeDelta: 0.006, longitudeDelta: 0.006 },
+        SHEET_TRANSITION_DURATION,
+      );
+    } catch (locationError: unknown) {
+      setError(
+        locationError instanceof Error
+          ? locationError.message
+          : "AggieShade could not determine your current location.",
+      );
+    } finally {
+      setLocating(false);
+    }
   }
 
   function expandSheet(field?: SearchField) {
@@ -558,6 +611,7 @@ export default function App() {
     if (field === "origin") {
       setOriginId(building.id);
       setOriginQuery(building.name);
+      setUserLocation(null);
       if (building.id === destinationId) {
         setDestinationId(null);
         setDestinationQuery("");
@@ -694,10 +748,10 @@ export default function App() {
         />
         <Marker
           key="origin-marker"
-          coordinate={originBuilding?.route_point ?? TAMU_REGION}
-          title={originBuilding?.short_name}
-          description={originBuilding?.name}
-          opacity={originBuilding ? 1 : 0}
+          coordinate={userLocation ?? originBuilding?.route_point ?? TAMU_REGION}
+          title={userLocation ? "My Location" : originBuilding?.short_name}
+          description={userLocation ? "Current route starting point" : originBuilding?.name}
+          opacity={userLocation || originBuilding ? 1 : 0}
           pinColor={GREEN}
           zIndex={30}
         />
@@ -845,17 +899,43 @@ export default function App() {
                         accessibilityHint="Exchanges the starting point and destination"
                         accessibilityLabel="Swap route endpoints"
                         accessibilityRole="button"
-                        disabled={!originQuery && !destinationQuery}
+                        disabled={Boolean(userLocation) || (!originQuery && !destinationQuery)}
                         onPress={swapRouteEndpoints}
                         style={({ pressed }) => [
                           styles.swapButton,
-                          !originQuery && !destinationQuery && styles.swapButtonDisabled,
+                          (userLocation || (!originQuery && !destinationQuery)) && styles.swapButtonDisabled,
                           pressed && styles.pressed,
                         ]}
                       >
                         <Text style={styles.swapButtonText}>⇅</Text>
                       </Pressable>
                     </View>
+
+                    <Pressable
+                      accessibilityHint="Uses your current position as the route starting point"
+                      accessibilityLabel="Use My Location"
+                      accessibilityRole="button"
+                      disabled={locating}
+                      onPress={() => void useCurrentLocation()}
+                      style={({ pressed }) => [
+                        styles.myLocationButton,
+                        userLocation && styles.myLocationButtonSelected,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      {locating ? (
+                        <ActivityIndicator color={MAROON} size="small" />
+                      ) : (
+                        <Text
+                          style={[
+                            styles.myLocationButtonText,
+                            userLocation && styles.myLocationButtonTextSelected,
+                          ]}
+                        >
+                          ◎ {userLocation ? "Using My Location" : "My Location"}
+                        </Text>
+                      )}
+                    </Pressable>
 
                     <View style={styles.actionArea}>
                       {error && <Text numberOfLines={2} style={styles.error}>{error}</Text>}
@@ -1086,6 +1166,18 @@ const styles = StyleSheet.create({
   },
   swapButtonDisabled: { opacity: 0.45 },
   swapButtonText: { color: MAROON, fontSize: 25, fontWeight: "800", lineHeight: 27 },
+  myLocationButton: {
+    minHeight: 38,
+    borderWidth: 1,
+    borderColor: "#D7C8B9",
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "white",
+  },
+  myLocationButtonSelected: { borderColor: GREEN, backgroundColor: "#E7F1EC" },
+  myLocationButtonText: { color: MAROON, fontSize: 13, fontWeight: "800" },
+  myLocationButtonTextSelected: { color: GREEN },
   panelScroll: { flex: 1 },
   expandedContent: {
     flexGrow: 1,

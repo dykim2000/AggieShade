@@ -16,7 +16,7 @@ from .models import (
     building_response,
 )
 from .shade.buildings import building_shadow_map_at, building_shadows_at
-from .shade.routing import shade_route_between
+from .shade.routing import shade_route_between, shade_route_from_point
 from .shade.solar import solar_position
 from .shade.trees import tree_shadow_map_at, tree_shadows_at
 
@@ -104,12 +104,20 @@ def get_building_shadow_map(at: datetime) -> BuildingShadowMapResponse:
 @app.post("/routes", response_model=RouteResponse)
 def create_route(request: RouteRequest) -> RouteResponse:
     try:
-        route = shade_route_between(
-            request.origin_id,
-            request.destination_id,
-            preference=request.preference,
-            observed_at=request.at,
-        )
+        if request.origin is not None:
+            route = shade_route_from_point(
+                (request.origin.latitude, request.origin.longitude),
+                request.destination_id,
+                preference=request.preference,
+                observed_at=request.at,
+            )
+        else:
+            route = shade_route_between(
+                request.origin_id or "",
+                request.destination_id,
+                preference=request.preference,
+                observed_at=request.at,
+            )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Unknown TAMU building") from exc
     except ValueError as exc:
