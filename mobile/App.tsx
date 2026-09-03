@@ -672,11 +672,8 @@ export default function App() {
               </Text>
               <Text style={styles.routeCardShade}>
                 {route.daylight
-                  ? `${route.shade_percentage.toFixed(0)}% shaded · ${formatDistance(route.shaded_distance_m)} in shade`
-                  : "Nighttime · shade routing inactive"}
-              </Text>
-              <Text style={styles.routeCardTime}>
-                Shade calculated for {formatRouteShadeTime(route.shade_bucket_start)}
+                  ? `${route.shade_percentage.toFixed(0)}% shaded · ${formatDistance(route.shaded_distance_m)} in shade · ${formatRouteShadeTime(route.shade_bucket_start)}`
+                  : `Nighttime · shade routing inactive · ${formatRouteShadeTime(route.shade_bucket_start)}`}
               </Text>
             </View>
           )}
@@ -901,7 +898,6 @@ const styles = StyleSheet.create({
   routeCardLabel: { color: GREEN, fontSize: 9, fontWeight: "800", letterSpacing: 1 },
   routeCardValue: { color: MAROON, fontSize: 17, fontWeight: "800", marginTop: 2 },
   routeCardShade: { color: "#62574D", fontSize: 11, fontWeight: "700", marginTop: 3 },
-  routeCardTime: { color: "#857970", fontSize: 10, fontWeight: "600", marginTop: 3 },
   selectionArea: {
     position: "absolute",
     top: SHEET_TOP,
