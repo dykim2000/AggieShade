@@ -775,6 +775,32 @@ export default function App() {
             </View>
           </View>
 
+          <Pressable
+            accessibilityHint="Uses your current position as the route starting point"
+            accessibilityLabel="Use My Location"
+            accessibilityRole="button"
+            disabled={locating}
+            onPress={() => void useCurrentLocation()}
+            style={({ pressed }) => [
+              styles.mapLocationButton,
+              userLocation && styles.mapLocationButtonSelected,
+              pressed && styles.pressed,
+            ]}
+          >
+            {locating ? (
+              <ActivityIndicator color={MAROON} size="small" />
+            ) : (
+              <Text
+                style={[
+                  styles.mapLocationButtonText,
+                  userLocation && styles.mapLocationButtonTextSelected,
+                ]}
+              >
+                ◎
+              </Text>
+            )}
+          </Pressable>
+
           {displayedRoute && (
             <View style={styles.routeCard}>
               <Text style={styles.routeCardLabel}>
@@ -911,32 +937,6 @@ export default function App() {
                       </Pressable>
                     </View>
 
-                    <Pressable
-                      accessibilityHint="Uses your current position as the route starting point"
-                      accessibilityLabel="Use My Location"
-                      accessibilityRole="button"
-                      disabled={locating}
-                      onPress={() => void useCurrentLocation()}
-                      style={({ pressed }) => [
-                        styles.myLocationButton,
-                        userLocation && styles.myLocationButtonSelected,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      {locating ? (
-                        <ActivityIndicator color={MAROON} size="small" />
-                      ) : (
-                        <Text
-                          style={[
-                            styles.myLocationButtonText,
-                            userLocation && styles.myLocationButtonTextSelected,
-                          ]}
-                        >
-                          ◎ {userLocation ? "Using My Location" : "My Location"}
-                        </Text>
-                      )}
-                    </Pressable>
-
                     <View style={styles.actionArea}>
                       {error && <Text numberOfLines={2} style={styles.error}>{error}</Text>}
                       <View style={styles.actionButtons}>
@@ -1066,6 +1066,28 @@ const styles = StyleSheet.create({
   },
   eyebrow: { color: GREEN, fontSize: 10, fontWeight: "700", letterSpacing: 1.4 },
   title: { color: MAROON, fontSize: 24, fontWeight: "800", letterSpacing: -0.6 },
+  mapLocationButton: {
+    position: "absolute",
+    top: 12,
+    right: 14,
+    zIndex: 11,
+    width: 48,
+    height: 48,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(80,0,0,0.16)",
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.96)",
+    shadowColor: "#2F2924",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.16,
+    shadowRadius: 7,
+    elevation: 5,
+  },
+  mapLocationButtonSelected: { borderColor: GREEN, backgroundColor: "#E7F1EC" },
+  mapLocationButtonText: { color: MAROON, fontSize: 28, fontWeight: "800", lineHeight: 30 },
+  mapLocationButtonTextSelected: { color: GREEN },
   routeCard: {
     position: "absolute",
     top: 78,
@@ -1166,18 +1188,6 @@ const styles = StyleSheet.create({
   },
   swapButtonDisabled: { opacity: 0.45 },
   swapButtonText: { color: MAROON, fontSize: 25, fontWeight: "800", lineHeight: 27 },
-  myLocationButton: {
-    minHeight: 38,
-    borderWidth: 1,
-    borderColor: "#D7C8B9",
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "white",
-  },
-  myLocationButtonSelected: { borderColor: GREEN, backgroundColor: "#E7F1EC" },
-  myLocationButtonText: { color: MAROON, fontSize: 13, fontWeight: "800" },
-  myLocationButtonTextSelected: { color: GREEN },
   panelScroll: { flex: 1 },
   expandedContent: {
     flexGrow: 1,
