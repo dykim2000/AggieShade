@@ -751,33 +751,22 @@ export default function App() {
                             <Text style={styles.routeButtonText}>Retry Connection</Text>
                           </Pressable>
                         ) : (
-                          <>
-                            {searchOpen && (
-                              <Pressable
-                                accessibilityRole="button"
-                                onPress={closeSearch}
-                                style={({ pressed }) => [styles.doneButton, pressed && styles.pressed]}
-                              >
-                                <Text style={styles.doneButtonText}>Done</Text>
-                              </Pressable>
+                          <Pressable
+                            accessibilityRole="button"
+                            disabled={!canRoute}
+                            onPress={requestRoute}
+                            style={({ pressed }) => [
+                              styles.routeButton,
+                              !canRoute && styles.routeButtonDisabled,
+                              pressed && styles.pressed,
+                            ]}
+                          >
+                            {routing ? (
+                              <ActivityIndicator color="white" />
+                            ) : (
+                              <Text style={styles.routeButtonText}>Find Route</Text>
                             )}
-                            <Pressable
-                              accessibilityRole="button"
-                              disabled={!canRoute}
-                              onPress={requestRoute}
-                              style={({ pressed }) => [
-                                styles.routeButton,
-                                !canRoute && styles.routeButtonDisabled,
-                                pressed && styles.pressed,
-                              ]}
-                            >
-                              {routing ? (
-                                <ActivityIndicator color="white" />
-                              ) : (
-                                <Text style={styles.routeButtonText}>Find Route</Text>
-                              )}
-                            </Pressable>
-                          </>
+                          </Pressable>
                         )}
                       </View>
                     </View>
@@ -1024,17 +1013,6 @@ const styles = StyleSheet.create({
   dismissArea: { flex: 1, minHeight: 40 },
   actionArea: { gap: 5 },
   actionButtons: { flexDirection: "row", gap: 8 },
-  doneButton: {
-    minHeight: 46,
-    borderWidth: 1,
-    borderColor: MAROON,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 18,
-    backgroundColor: "white",
-  },
-  doneButtonText: { color: MAROON, fontSize: 14, fontWeight: "800" },
   loadingRow: {
     height: SHEET_PEEK_HEIGHT - 68,
     flexDirection: "row",
