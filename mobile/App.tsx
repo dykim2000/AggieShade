@@ -44,6 +44,7 @@ const SHEET_PEEK_HEIGHT = 380;
 const SHEET_MINIMIZED_HEIGHT = 68;
 const SHEET_BOTTOM_OVERSCAN = 128;
 const SHEET_TRANSITION_DURATION = 264;
+const MIN_ALTERNATIVE_DISTANCE_SAVINGS_M = 50;
 const COMMON_PLACE_IDS = ["msc", "evans", "zachry", "kyle", "academic", "sbisa"];
 const ABSOLUTE_FILL = { position: "absolute" as const, top: 0, right: 0, bottom: 0, left: 0 };
 const TAMU_REGION = {
@@ -54,6 +55,7 @@ const TAMU_REGION = {
 };
 
 type SearchField = "origin" | "destination";
+type RouteChoice = "shadiest" | "faster";
 
 type TreeShadowOverlayProps = {
   geojson: TreeShadowGeoJson;
@@ -271,6 +273,8 @@ export default function App() {
   const [destinationQuery, setDestinationQuery] = useState("");
   const [activeField, setActiveField] = useState<SearchField>("destination");
   const [route, setRoute] = useState<Route | null>(null);
+  const [alternativeRoute, setAlternativeRoute] = useState<Route | null>(null);
+  const [routeChoice, setRouteChoice] = useState<RouteChoice>("shadiest");
   const [loading, setLoading] = useState(true);
   const [routing, setRouting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -371,14 +375,21 @@ export default function App() {
     };
   }, []);
 
+  const displayedRoute = routeChoice === "faster" && alternativeRoute ? alternativeRoute : route;
+  const secondaryRoute = alternativeRoute
+    ? routeChoice === "faster"
+      ? route
+      : alternativeRoute
+    : null;
+
   useEffect(() => {
-    if (route?.geometry.length) {
-      mapRef.current?.fitToCoordinates(route.geometry, {
+    if (displayedRoute?.geometry.length) {
+      mapRef.current?.fitToCoordinates(displayedRoute.geometry, {
         edgePadding: { top: 150, right: 48, bottom: SHEET_MINIMIZED_HEIGHT + 24, left: 48 },
         animated: true,
       });
     }
-  }, [route]);
+  }, [displayedRoute]);
 
   const canRoute = Boolean(originId && destinationId && originId !== destinationId && !routing);
   const originBuilding = useMemo(
@@ -418,8 +429,27 @@ export default function App() {
     setRouting(true);
     setError(null);
     try {
-      const nextRoute = await getRoute(originId, destinationId, "shadiest", new Date());
-      if (requestId === routeRequestIdRef.current) setRoute(nextRoute);
+      const requestedAt = new Date();
+      const [shadiestResult, fastestResult] = await Promise.allSettled([
+        getRoute(originId, destinationId, "shadiest", requestedAt),
+        getRoute(originId, destinationId, "fastest", requestedAt),
+      ]);
+      if (shadiestResult.status === "rejected") throw shadiestResult.reason;
+      if (requestId === routeRequestIdRef.current) {
+        const nextRoute = shadiestResult.value;
+        const candidate = fastestResult.status === "fulfilled" ? fastestResult.value : null;
+        const distanceSavings = candidate ? nextRoute.distance_m - candidate.distance_m : 0;
+        const shadeLoss = candidate ? nextRoute.shade_percentage - candidate.shade_percentage : 0;
+        setRoute(nextRoute);
+        setAlternativeRoute(
+          candidate &&
+            distanceSavings >= MIN_ALTERNATIVE_DISTANCE_SAVINGS_M &&
+            shadeLoss > 0
+            ? candidate
+            : null,
+        );
+        setRouteChoice("shadiest");
+      }
     } catch (requestError: unknown) {
       if (requestId === routeRequestIdRef.current) {
         setError(requestError instanceof Error ? requestError.message : "Could not calculate the route");
@@ -434,6 +464,8 @@ export default function App() {
     setRouting(false);
     setActiveField(field);
     setRoute(null);
+    setAlternativeRoute(null);
+    setRouteChoice("shadiest");
     setError(null);
     if (field === "origin") {
       setOriginQuery(value);
@@ -448,6 +480,20 @@ export default function App() {
     originInputRef.current?.blur();
     destinationInputRef.current?.blur();
     Keyboard.dismiss();
+  }
+
+  function swapRouteEndpoints() {
+    routeRequestIdRef.current += 1;
+    setRouting(false);
+    setOriginId(destinationId);
+    setDestinationId(originId);
+    setOriginQuery(destinationQuery);
+    setDestinationQuery(originQuery);
+    setActiveField((field) => (field === "origin" ? "destination" : "origin"));
+    setRoute(null);
+    setAlternativeRoute(null);
+    setRouteChoice("shadiest");
+    setError(null);
   }
 
   function expandSheet(field?: SearchField) {
@@ -506,6 +552,8 @@ export default function App() {
     routeRequestIdRef.current += 1;
     setRouting(false);
     setRoute(null);
+    setAlternativeRoute(null);
+    setRouteChoice("shadiest");
     setError(null);
     if (field === "origin") {
       setOriginId(building.id);
@@ -620,7 +668,16 @@ export default function App() {
           <TreeShadowOverlay geojson={treeShadowMap.geojson} />
         ) : null}
         <Polyline
-          coordinates={route?.geometry ?? []}
+          coordinates={secondaryRoute?.geometry ?? []}
+          strokeColor="rgba(40,112,82,0.72)"
+          strokeWidth={4}
+          lineCap="round"
+          lineDashPattern={[8, 6]}
+          lineJoin="round"
+          zIndex={18}
+        />
+        <Polyline
+          coordinates={displayedRoute?.geometry ?? []}
           strokeColor="rgba(255,255,255,0.96)"
           strokeWidth={9}
           lineCap="round"
@@ -628,8 +685,8 @@ export default function App() {
           zIndex={20}
         />
         <Polyline
-          coordinates={route?.geometry ?? []}
-          strokeColor={MAROON}
+          coordinates={displayedRoute?.geometry ?? []}
+          strokeColor={routeChoice === "faster" ? GREEN : MAROON}
           strokeWidth={5}
           lineCap="round"
           lineJoin="round"
@@ -664,17 +721,62 @@ export default function App() {
             </View>
           </View>
 
-          {route && (
-            <View pointerEvents="none" style={styles.routeCard}>
-              <Text style={styles.routeCardLabel}>SHADIEST ROUTE</Text>
+          {displayedRoute && (
+            <View style={styles.routeCard}>
+              <Text style={styles.routeCardLabel}>
+                {routeChoice === "faster" ? "FASTER ALTERNATIVE" : "SHADIEST ROUTE"}
+              </Text>
               <Text style={styles.routeCardValue}>
-                {formatDuration(route.duration_seconds)} · {formatDistance(route.distance_m)}
+                {formatDuration(displayedRoute.duration_seconds)} · {formatDistance(displayedRoute.distance_m)}
               </Text>
               <Text style={styles.routeCardShade}>
-                {route.daylight
-                  ? `${route.shade_percentage.toFixed(0)}% shaded · ${formatDistance(route.shaded_distance_m)} in shade · ${formatRouteShadeTime(route.shade_bucket_start)}`
-                  : `Nighttime · shade routing inactive · ${formatRouteShadeTime(route.shade_bucket_start)}`}
+                {displayedRoute.daylight
+                  ? `${displayedRoute.shade_percentage.toFixed(0)}% shaded · ${formatDistance(displayedRoute.shaded_distance_m)} in shade · ${formatRouteShadeTime(displayedRoute.shade_bucket_start)}`
+                  : `Nighttime · shade routing inactive · ${formatRouteShadeTime(displayedRoute.shade_bucket_start)}`}
               </Text>
+              {alternativeRoute && route && (
+                <View style={styles.routeChoiceRow}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: routeChoice === "shadiest" }}
+                    onPress={() => setRouteChoice("shadiest")}
+                    style={({ pressed }) => [
+                      styles.routeChoiceButton,
+                      routeChoice === "shadiest" && styles.routeChoiceButtonSelected,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.routeChoiceText,
+                        routeChoice === "shadiest" && styles.routeChoiceTextSelected,
+                      ]}
+                    >
+                      Shadiest
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityHint={`Saves ${formatDistance(route.distance_m - alternativeRoute.distance_m)}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: routeChoice === "faster" }}
+                    onPress={() => setRouteChoice("faster")}
+                    style={({ pressed }) => [
+                      styles.routeChoiceButton,
+                      routeChoice === "faster" && styles.routeChoiceButtonSelected,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.routeChoiceText,
+                        routeChoice === "faster" && styles.routeChoiceTextSelected,
+                      ]}
+                    >
+                      Faster · saves {formatDistance(route.distance_m - alternativeRoute.distance_m)}
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
             </View>
           )}
 
@@ -716,28 +818,44 @@ export default function App() {
               ) : (
                 <>
                   <View style={styles.routeForm}>
-                    <SearchInput
-                      active={activeField === "origin"}
-                      expanded={searchOpen}
-                      field="origin"
-                      inputRef={originInputRef}
-                      label="Starting point"
-                      onChange={(value) => updateQuery("origin", value)}
-                      onFocus={openSearch}
-                      onOpen={openSearch}
-                      value={originQuery}
-                    />
-                    <SearchInput
-                      active={activeField === "destination"}
-                      expanded={searchOpen}
-                      field="destination"
-                      inputRef={destinationInputRef}
-                      label="Destination"
-                      onChange={(value) => updateQuery("destination", value)}
-                      onFocus={openSearch}
-                      onOpen={openSearch}
-                      value={destinationQuery}
-                    />
+                    <View style={styles.routeFields}>
+                      <SearchInput
+                        active={activeField === "origin"}
+                        expanded={searchOpen}
+                        field="origin"
+                        inputRef={originInputRef}
+                        label="Starting point"
+                        onChange={(value) => updateQuery("origin", value)}
+                        onFocus={openSearch}
+                        onOpen={openSearch}
+                        value={originQuery}
+                      />
+                      <SearchInput
+                        active={activeField === "destination"}
+                        expanded={searchOpen}
+                        field="destination"
+                        inputRef={destinationInputRef}
+                        label="Destination"
+                        onChange={(value) => updateQuery("destination", value)}
+                        onFocus={openSearch}
+                        onOpen={openSearch}
+                        value={destinationQuery}
+                      />
+                      <Pressable
+                        accessibilityHint="Exchanges the starting point and destination"
+                        accessibilityLabel="Swap route endpoints"
+                        accessibilityRole="button"
+                        disabled={!originQuery && !destinationQuery}
+                        onPress={swapRouteEndpoints}
+                        style={({ pressed }) => [
+                          styles.swapButton,
+                          !originQuery && !destinationQuery && styles.swapButtonDisabled,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Text style={styles.swapButtonText}>⇅</Text>
+                      </Pressable>
+                    </View>
 
                     <View style={styles.actionArea}>
                       {error && <Text numberOfLines={2} style={styles.error}>{error}</Text>}
@@ -871,6 +989,7 @@ const styles = StyleSheet.create({
   routeCard: {
     position: "absolute",
     top: 78,
+    right: 14,
     left: 14,
     zIndex: 9,
     backgroundColor: "rgba(255,255,255,0.96)",
@@ -887,6 +1006,21 @@ const styles = StyleSheet.create({
   routeCardLabel: { color: GREEN, fontSize: 9, fontWeight: "800", letterSpacing: 1 },
   routeCardValue: { color: MAROON, fontSize: 17, fontWeight: "800", marginTop: 2 },
   routeCardShade: { color: "#62574D", fontSize: 11, fontWeight: "700", marginTop: 3 },
+  routeChoiceRow: { flexDirection: "row", gap: 6, marginTop: 8 },
+  routeChoiceButton: {
+    flex: 1,
+    minHeight: 32,
+    borderWidth: 1,
+    borderColor: "#D7C8B9",
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 8,
+    backgroundColor: "#F8F6F1",
+  },
+  routeChoiceButtonSelected: { borderColor: MAROON, backgroundColor: MAROON },
+  routeChoiceText: { color: "#62574D", fontSize: 10, fontWeight: "800" },
+  routeChoiceTextSelected: { color: "white" },
   selectionArea: {
     position: "absolute",
     top: SHEET_TOP,
@@ -930,6 +1064,28 @@ const styles = StyleSheet.create({
   sheetTitle: { marginTop: 1, color: "#2F2924", fontSize: 23, fontWeight: "800", letterSpacing: -0.5 },
   keyboardPanel: { flex: 1 },
   routeForm: { paddingHorizontal: 16, paddingTop: 3, paddingBottom: 8, gap: 8 },
+  routeFields: { position: "relative", gap: 8 },
+  swapButton: {
+    position: "absolute",
+    top: 51,
+    right: 8,
+    zIndex: 4,
+    width: 38,
+    height: 38,
+    borderWidth: 1,
+    borderColor: "#D7C8B9",
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "white",
+    shadowColor: "#2F2924",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.16,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  swapButtonDisabled: { opacity: 0.45 },
+  swapButtonText: { color: MAROON, fontSize: 25, fontWeight: "800", lineHeight: 27 },
   panelScroll: { flex: 1 },
   expandedContent: {
     flexGrow: 1,
@@ -948,9 +1104,10 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 11,
+    paddingLeft: 11,
+    paddingRight: 50,
   },
-  searchShellActive: { borderColor: MAROON, borderWidth: 2, paddingHorizontal: 10 },
+  searchShellActive: { borderColor: MAROON, borderWidth: 2, paddingLeft: 10, paddingRight: 49 },
   fieldBadge: {
     width: 24,
     height: 24,
