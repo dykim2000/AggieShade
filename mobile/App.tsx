@@ -46,6 +46,7 @@ const SHEET_MINIMIZED_HEIGHT = 92;
 const SHEET_BOTTOM_OVERSCAN = 128;
 const SHEET_TRANSITION_DURATION = 264;
 const COMMON_PLACE_IDS = ["msc", "evans", "zachry", "kyle", "academic", "sbisa"];
+const ABSOLUTE_FILL = { position: "absolute" as const, top: 0, right: 0, bottom: 0, left: 0 };
 const TAMU_REGION = {
   latitude: 30.6168,
   longitude: -96.3411,
@@ -892,9 +893,9 @@ export default function App() {
 
 const styles = StyleSheet.create({
   appRoot: { flex: 1, backgroundColor: "#E8E3D8" },
-  safeAreaOverlay: { ...StyleSheet.absoluteFillObject },
+  safeAreaOverlay: { ...ABSOLUTE_FILL },
   content: { flex: 1 },
-  map: { ...StyleSheet.absoluteFillObject },
+  map: { ...ABSOLUTE_FILL },
   header: {
     position: "absolute",
     top: 8,
@@ -1011,7 +1012,7 @@ const styles = StyleSheet.create({
   destinationBadge: { backgroundColor: MAROON },
   fieldBadgeText: { color: "white", fontSize: 11, fontWeight: "800" },
   searchInput: { flex: 1, color: "#2F2924", fontSize: 15, paddingVertical: 10 },
-  searchOpenTarget: { ...StyleSheet.absoluteFillObject, zIndex: 1, borderRadius: 14 },
+  searchOpenTarget: { ...ABSOLUTE_FILL, zIndex: 1, borderRadius: 14 },
   preferenceGroup: { gap: 3 },
   preferenceControl: {
     minHeight: 40,
